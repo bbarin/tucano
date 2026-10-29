@@ -131,7 +131,8 @@ export function hermesHome(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' 
   return home
 }
 
-// The model is "<provider>/<model>", or a bare id routed by the user's config.
+// The model is "<provider>/<model>" as the picker lists it; the CLI wants the
+// model id alone and the provider named separately (--provider).
 export function hermesEngine(bin: () => string | undefined, appDir: string, shellEnv: () => Promise<NodeJS.ProcessEnv> = async () => ({})): Engine {
   return {
     id: 'hermes',
@@ -141,13 +142,15 @@ export function hermesEngine(bin: () => string | undefined, appDir: string, shel
         yield { type: 'error', message: L('O Hermes não está instalado. Veja em Configurações.', "Hermes isn't installed. See Settings.") }
         return
       }
+      const [prefix, ...rest] = turn.model.split('/')
       const user = userHermesProviders()
-      const provider = turn.model.includes('/') ? turn.model.split('/')[0]! : ((user['model'] as Record<string, unknown> | undefined)?.['provider'] as string | undefined)
+      const provider = rest.length ? prefix : ((user['model'] as Record<string, unknown> | undefined)?.['provider'] as string | undefined)
+      const model = rest.length ? rest.join('/') : turn.model
       const home = hermesHome(appDir, turn)
       // Provider keys may live in the user's shell (a key_cmd like tompero),
       // which an app opened from Finder doesn't get.
       const env = { ...process.env, ...(await shellEnv()), HERMES_HOME: home, HERMES_ENVIRONMENT_HINT: turn.system }
-      yield* runCli({ bin: path, args: hermesArgs(turn, provider), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: hermesParser(), env })
+      yield* runCli({ bin: path, args: hermesArgs({ ...turn, model }, provider), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: hermesParser(), env })
     }
   }
 }
