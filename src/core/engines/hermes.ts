@@ -68,8 +68,10 @@ const REASONING: Record<Effort, string> = { low: 'low', medium: 'medium', high: 
 // SOUL.md, memory or preloaded skills. The provider is named explicitly (a
 // bare model id otherwise falls back to a provider the person never picked);
 // the system prompt rides in HERMES_ENVIRONMENT_HINT (the home's config has
-// no prompt mechanism that reaches a one-shot run).
+// no prompt mechanism that reaches a one-shot run). The CLI's --image takes
+// one path (repeating it keeps the last), so the newest image rides along.
 export function hermesArgs(turn: Pick<Turn, 'model' | 'effort' | 'images'>, provider?: string): string[] {
+  const image = [...(turn.images ?? [])].reverse().find((i) => existsSync(i.path))
   return [
     'chat',
     '--format', 'stream-json',
@@ -78,7 +80,7 @@ export function hermesArgs(turn: Pick<Turn, 'model' | 'effort' | 'images'>, prov
     '--reasoning', REASONING[turn.effort],
     '-m', turn.model,
     ...(provider ? ['--provider', provider] : []),
-    ...(turn.images ?? []).filter((i) => existsSync(i.path)).flatMap((i) => ['--image', i.path])
+    ...(image ? ['--image', image.path] : [])
   ]
 }
 

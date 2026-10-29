@@ -68,7 +68,7 @@ describe('hermes setup', () => {
     ])
   })
 
-  it('names the provider of a bare model id from the user config, and attaches existing images only', () => {
+  it('names the provider of a bare model id from the user config, and attaches the newest existing image only', () => {
     const args = hermesArgs({ model: 'deepseek-v4-flash-official', effort: 'low', images: [{ block: 0, path: '/tmp/inexistente.png', mime: 'image/png' }] }, 'genplat')
     expect(args).toEqual(['chat', '--format', 'stream-json', '--query-file', '-', '--ignore-rules', '--reasoning', 'low', '-m', 'deepseek-v4-flash-official', '--provider', 'genplat'])
   })
