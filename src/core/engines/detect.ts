@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process'
 import { access, constants } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { L } from '../../shared/lang'
 import type { EngineId, EngineStatus } from '../../shared/types'
@@ -145,7 +147,47 @@ export async function detectPi(): Promise<{ status: EngineStatus; models: string
   return { status: listedStatus(path, v.stdout, models, 'pi (e /login)'), models }
 }
 
+// The model ids Hermes can run, from its provider cache: one entry per
+// credential (a provider slug, or `custom:<url>#<fingerprint>` for an endpoint
+// in the person's config), each with the models its catalog lists.
+export function parseHermesModels(file = join(process.env['HERMES_HOME'] || join(homedir(), '.hermes'), 'provider_models_cache.json')): string[] {
+  let cache: Record<string, unknown>
+  try {
+    cache = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
+  } catch {
+    return []
+  }
+  const out: string[] = []
+  for (const [key, entry] of Object.entries(cache)) {
+    const models = ((entry ?? {}) as Record<string, unknown>)['models']
+    if (!Array.isArray(models)) continue
+    // A custom endpoint keyed by URL is one provider: its label is its host,
+    // not the whole key (a fingerprint would change on every key rotation).
+    const provider = key.startsWith('custom:') ? (hostOf(key.slice(7)) ?? key) : key
+    for (const m of models) if (typeof m === 'string' && m) out.push(`${provider}/${m}`)
+  }
+  return out
+}
+
+const hostOf = (key: string): string | undefined => {
+  const url = key.split('#')[0]!
+  try {
+    return new URL(url).host
+  } catch {
+    return undefined
+  }
+}
+
+export async function detectHermes(): Promise<{ status: EngineStatus; models: string[] }> {
+  const path = await which('hermes')
+  if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
+  const v = await run(path, ['--version'])
+  const models = parseHermesModels()
+  // What the cache lists is what the person can use; the status is the list.
+  return { status: listedStatus(path, v.stdout, models, 'hermes setup'), models }
+}
+
 export async function detectEngines(codexHome: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>> }> {
-  const [claude, codex, opencode, pi] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi()])
-  return { engines: { claude, codex, opencode: opencode.status, pi: pi.status, hermes: { installed: false, loggedIn: false } }, listed: { opencode: opencode.models, pi: pi.models } }
+  const [claude, codex, opencode, pi, hermes] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectHermes()])
+  return { engines: { claude, codex, opencode: opencode.status, pi: pi.status, hermes: hermes.status }, listed: { opencode: opencode.models, pi: pi.models, hermes: hermes.models } }
 }

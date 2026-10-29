@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import { describe, expect, it } from 'vitest'
 import { hermesArgs, hermesHome, hermesParser, userHermesProviders } from '../src/core/engines/hermes'
+import { parseHermesModels } from '../src/core/engines/detect'
 
 // Fixture is real CLI output (`hermes chat --format stream-json`, Hermes 2026-10-29), trimmed.
 const lines = readFileSync(join(import.meta.dirname, 'fixtures', 'hermes-stream.jsonl'), 'utf8').split('\n').filter((l) => l.trim())
@@ -112,5 +113,20 @@ describe('hermes setup', () => {
     const c = parseYaml(readFileSync(join(home, 'config.yaml'), 'utf8')) as Record<string, unknown>
     expect(existsSync(join(home, 'config.yaml'))).toBe(true)
     expect(c['mcp_servers']).toBeUndefined() // the last turn's gateway is gone
+  })
+
+  it('reads the model ids from the provider cache', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hc-'))
+    // Shape of the real cache: one entry per credential, models per entry.
+    writeFileSync(
+      join(dir, 'provider_models_cache.json'),
+      JSON.stringify({
+        copilot: { fp: 'x', at: 1, models: ['gpt-5.4', 'claude-sonnet-5'] },
+        'custom:https://llm.acme.com/api/v2#aa2f87b585a35b95': { fp: 'y', at: 2, models: ['deepseek-v4-flash'] },
+        'custom:https://broken#z': { fp: 'z', at: 3, models: ['m'] }
+      })
+    )
+    expect(parseHermesModels(join(dir, 'provider_models_cache.json'))).toEqual(['copilot/gpt-5.4', 'copilot/claude-sonnet-5', 'llm.acme.com/deepseek-v4-flash', 'broken/m'])
+    expect(parseHermesModels(join(dir, 'missing.json'))).toEqual([])
   })
 })
