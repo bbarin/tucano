@@ -22,6 +22,7 @@ describe('harnesses', () => {
     expect(out.codex.loggedIn).toBe(true)
     expect(out.opencode.loggedIn).toBe(true)
     expect(out.pi.loggedIn).toBe(true)
+    expect(out.hermes.loggedIn).toBe(true)
   })
 
   it('turns off the harnesses the person left out', () => {
