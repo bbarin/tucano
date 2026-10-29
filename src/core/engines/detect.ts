@@ -147,5 +147,5 @@ export async function detectPi(): Promise<{ status: EngineStatus; models: string
 
 export async function detectEngines(codexHome: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>> }> {
   const [claude, codex, opencode, pi] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi()])
-  return { engines: { claude, codex, opencode: opencode.status, pi: pi.status }, listed: { opencode: opencode.models, pi: pi.models } }
+  return { engines: { claude, codex, opencode: opencode.status, pi: pi.status, hermes: { installed: false, loggedIn: false } }, listed: { opencode: opencode.models, pi: pi.models } }
 }

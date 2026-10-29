@@ -4,7 +4,7 @@ import { L, lang, type Lang } from './lang'
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
 export type GrantLevel = 'none' | 'read' | 'read_write'
 export type ToolClass = 'read' | 'write' | 'sensitive'
-export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi'
+export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'hermes'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh'
 export type MemoryMode = 'auto' | 'approve' | 'read' // how an agent's `lembrar` calls land
 
@@ -284,7 +284,8 @@ export const ENGINES: Record<EngineId, { label: string; cli: string; login: stri
   claude: { label: 'Claude Code', cli: 'claude', login: 'claude auth login', install: 'curl -fsSL https://claude.ai/install.sh | bash', site: 'https://code.claude.com' },
   codex: { label: 'Codex', cli: 'codex', login: 'codex login', install: 'npm install -g @openai/codex', site: 'https://github.com/openai/codex' },
   opencode: { label: 'OpenCode', cli: 'opencode', login: 'opencode auth login', install: 'curl -fsSL https://opencode.ai/install | bash', site: 'https://opencode.ai' },
-  pi: { label: 'Pi', cli: 'pi', login: 'pi', install: 'npm install -g @earendil-works/pi-coding-agent', site: 'https://pi.dev' }
+  pi: { label: 'Pi', cli: 'pi', login: 'pi', install: 'npm install -g @earendil-works/pi-coding-agent', site: 'https://pi.dev' },
+  hermes: { label: 'Hermes', cli: 'hermes', login: 'hermes setup', install: 'See https://hermes-agent.nousresearch.com/docs', site: 'https://hermes-agent.nousresearch.com' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
 
@@ -370,7 +371,7 @@ export interface ConnectorInput {
 }
 
 // An MCP server found in a harness's own setup (Claude Code, Codex,
-// OpenCode), to add as a connector. Names only: its secrets stay in the core.
+// OpenCode, Hermes), to add as a connector. Names only: its secrets stay in the core.
 export interface HarnessMcp {
   key: string // the same server in two harnesses has one key
   name: string
