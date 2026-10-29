@@ -329,7 +329,7 @@ export const usable = (m: Model | undefined): Model | undefined => (m?.id ? m : 
 export const modelInfo = (id: string): Model | undefined => {
   const listed = MODELS.find((m) => m.id === id)
   if (listed) return listed
-  const m = /^(claude|codex|opencode|pi):(.*)$/s.exec(id)
+  const m = /^(claude|codex|opencode|pi|hermes):(.*)$/s.exec(id)
   return m ? { id: m[2]!.trim(), engine: m[1] as EngineId, label: m[2]!.trim(), hint: L('Nome próprio', 'Custom name') } : undefined
 }
 
