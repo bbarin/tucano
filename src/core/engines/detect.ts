@@ -8,6 +8,7 @@ import type { EngineId, EngineStatus } from '../../shared/types'
 import { userProvider } from './claude'
 import { codexEnv, userCodexProvider } from './codex'
 import { opencodeMajor } from './opencode-v2'
+import { userHermesProviders } from './hermes'
 
 function run(bin: string, args: string[], timeout = 15_000, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
@@ -149,8 +150,13 @@ export async function detectPi(): Promise<{ status: EngineStatus; models: string
 
 // The model ids Hermes can run, from its provider cache: one entry per
 // credential (a provider slug, or `custom:<url>#<fingerprint>` for an endpoint
-// in the person's config), each with the models its catalog lists.
-export function parseHermesModels(file = join(process.env['HERMES_HOME'] || join(homedir(), '.hermes'), 'provider_models_cache.json')): string[] {
+// in the person's config), each with the models its catalog lists. A custom
+// endpoint is labelled with the config key it belongs to (genplat), not the
+// host: that is the name the CLI routes with.
+export function parseHermesModels(
+  file = join(process.env['HERMES_HOME'] || join(homedir(), '.hermes'), 'provider_models_cache.json'),
+  providers: Record<string, string> = {}
+): string[] {
   let cache: Record<string, unknown>
   try {
     cache = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
@@ -161,16 +167,28 @@ export function parseHermesModels(file = join(process.env['HERMES_HOME'] || join
   for (const [key, entry] of Object.entries(cache)) {
     const models = ((entry ?? {}) as Record<string, unknown>)['models']
     if (!Array.isArray(models)) continue
-    // A custom endpoint keyed by URL is one provider: its label is its host,
-    // not the whole key (a fingerprint would change on every key rotation).
-    const provider = key.startsWith('custom:') ? (hostOf(key.slice(7)) ?? key) : key
+    const provider = key.startsWith('custom:') ? (providers[normalizeUrl(endpointUrl(key))] ?? hostOf(endpointUrl(key)) ?? key) : key
     for (const m of models) if (typeof m === 'string' && m) out.push(`${provider}/${m}`)
   }
   return out
 }
 
-const hostOf = (key: string): string | undefined => {
-  const url = key.split('#')[0]!
+const endpointUrl = (key: string): string => key.slice(7).split('#')[0]! // "custom:<url>#<fingerprint>" → url
+const normalizeUrl = (url: string): string => url.trim().replace(/\/+$/, '').toLowerCase()
+
+// The endpoints of the person's own providers, by config key: a URL with
+// trailing slashes and case differences is still the same endpoint.
+export const hermesEndpointProviders = (providers: Record<string, unknown> | undefined): Record<string, string> => {
+  const out: Record<string, string> = {}
+  for (const [key, entry] of Object.entries(providers ?? {})) {
+    const e = (entry ?? {}) as Record<string, unknown>
+    const url = e['base_url'] ?? e['url'] ?? e['api']
+    if (typeof url === 'string' && url) out[normalizeUrl(url)] = key
+  }
+  return out
+}
+
+const hostOf = (url: string): string | undefined => {
   try {
     return new URL(url).host
   } catch {
@@ -182,7 +200,7 @@ export async function detectHermes(): Promise<{ status: EngineStatus; models: st
   const path = await which('hermes')
   if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
   const v = await run(path, ['--version'])
-  const models = parseHermesModels()
+  const models = parseHermesModels(undefined, hermesEndpointProviders(userHermesProviders()['providers'] as Record<string, unknown> | undefined))
   // What the cache lists is what the person can use; the status is the list.
   return { status: listedStatus(path, v.stdout, models, 'hermes setup'), models }
 }

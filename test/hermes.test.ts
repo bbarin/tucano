@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import { describe, expect, it } from 'vitest'
 import { hermesArgs, hermesHome, hermesParser, userHermesProviders } from '../src/core/engines/hermes'
-import { parseHermesModels } from '../src/core/engines/detect'
+import { hermesEndpointProviders, parseHermesModels } from '../src/core/engines/detect'
 
 // Fixture is real CLI output (`hermes chat --format stream-json`, Hermes 2026-10-29), trimmed.
 const lines = readFileSync(join(import.meta.dirname, 'fixtures', 'hermes-stream.jsonl'), 'utf8').split('\n').filter((l) => l.trim())
@@ -126,7 +126,10 @@ describe('hermes setup', () => {
         'custom:https://broken#z': { fp: 'z', at: 3, models: ['m'] }
       })
     )
-    expect(parseHermesModels(join(dir, 'provider_models_cache.json'))).toEqual(['copilot/gpt-5.4', 'copilot/claude-sonnet-5', 'llm.acme.com/deepseek-v4-flash', 'broken/m'])
+    const providers = hermesEndpointProviders({ genplat: { base_url: 'https://llm.acme.com/api/v2/' } })
+    // The person's own endpoint is labelled with its config key (that is what
+    // --provider takes); an endpoint that is in no config falls back to its host.
+    expect(parseHermesModels(join(dir, 'provider_models_cache.json'), providers)).toEqual(['copilot/gpt-5.4', 'copilot/claude-sonnet-5', 'genplat/deepseek-v4-flash', 'broken/m'])
     expect(parseHermesModels(join(dir, 'missing.json'))).toEqual([])
   })
 })
