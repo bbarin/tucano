@@ -2,7 +2,7 @@
 // live here so the window never waits on agent work. The renderer talks to it
 // over a MessagePort handed out by the main process.
 import { execFile, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -33,7 +33,7 @@ import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Browser, type BrowserHost } from './browser'
-import { loginShell, onPath, osOf, terminalCommand } from './platform'
+import { isWin, loginShell, onPath, osOf, shellCommand, terminalCommand } from './platform'
 import { ChromeBrowsers, hasChrome } from './chrome'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
@@ -111,8 +111,11 @@ const engineImpls: Record<EngineId, Engine> = fake
     }
 
 // A command in the login shell, where SSO tools live; what it prints, trimmed.
-const runHelper = (cmd: string): Promise<string | undefined> =>
-  new Promise((resolve) => execFile(loginShell(), ['-lc', cmd], { timeout: 30_000 }, (err, out) => resolve(err ? undefined : String(out).trim() || undefined)))
+// Windows has no login shell: the same shell agents' commands use (Git Bash, or cmd.exe).
+const runHelper = (cmd: string): Promise<string | undefined> => {
+  const sh = isWin ? shellCommand(cmd) : { file: loginShell(), args: ['-lc', cmd], verbatim: false, env: process.env }
+  return new Promise((resolve) => execFile(sh.file, sh.args, { timeout: 30_000, env: sh.env, windowsHide: true, windowsVerbatimArguments: sh.verbatim }, (err, out) => resolve(err ? undefined : String(out).trim() || undefined)))
+}
 
 // The MCP servers in the harnesses' own setup, and which are already connectors (same address).
 async function foundMcps(): Promise<FoundMcp[]> {
@@ -753,6 +756,14 @@ const api: Api = {
   loginEngine: ({ engine }) => {
     const bin = engines[engine].path ?? ENGINES[engine].cli
     const sub = ENGINES[engine].login.split(' ').slice(1).join(' ')
+    if (isWin) {
+      // A new console window running a small script: cmd's quoting can't be trusted with paths otherwise.
+      const script = join(dataDir, 'login.cmd')
+      const env = engine === 'codex' ? `set "HOME=${codexHome}"\r\nset "CODEX_HOME=${join(codexHome, '.codex')}"\r\n` : ''
+      writeFileSync(script, `@echo off\r\n${env}call "${bin}" ${sub}\r\n`)
+      spawn(process.env['ComSpec'] || 'cmd.exe', ['/d', '/c', 'start', '"Tucano"', 'cmd.exe', '/k', `"${script}"`], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref()
+      return { opened: true, command: `"${bin}" ${sub}` }
+    }
     const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
     const cmd = engine === 'codex' ? `HOME=${q(codexHome)} CODEX_HOME=${q(join(codexHome, '.codex'))} ${q(bin)} ${sub}` : `${q(bin)} ${sub}`
     const term = terminalCommand(cmd, osOf(), onPath)

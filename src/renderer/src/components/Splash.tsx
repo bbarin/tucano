@@ -199,8 +199,10 @@ export function Splash({ onDone }: { onDone: () => void }): ReactNode {
 
     // Wind under the blades: the leaves shake.
     $$('.sp-sway').forEach((g, i) => {
-      const [, x, y] = g.getAttribute('transform')!.match(/translate\(([-\d.]+) ([-\d.]+)\)/)!
-      origin(g, +x!, +y!)
+      // Kept in a data attribute: GSAP rewrites the transform, and StrictMode runs this twice in dev.
+      const at = ((g as SVGElement).dataset['at'] ??= g.getAttribute('transform')!.match(/translate\(([-\d.]+) ([-\d.]+)\)/)!.slice(1).join(' '))
+      const [x, y] = at.split(' ').map(Number)
+      origin(g, x!, y!)
       tl.to(g, { rotation: -6 - (i % 3) * 2, duration: 0.18, ease: 'sine.inOut', yoyo: true, repeat: 11 }, 1.8 + i * 0.03)
       tl.to(g, { rotation: 0, duration: 0.6, ease: 'sine.out' }, 4.2)
     })

@@ -11,6 +11,7 @@ import type { Db } from './db'
 import type { ToolDef } from './gateway'
 import { frontmatter, readLinked } from './local-skills'
 import { readdirSync, readFileSync } from 'node:fs'
+import { basename, dirname } from 'node:path'
 
 const MAX_BODY = 20_000
 const MAX_PENDING = 5 // per agent, so an agent can't flood the review
@@ -72,7 +73,7 @@ export const PROPOR_SKILL: ToolDef = {
 // The files next to a linked skill's SKILL.md, for the agent to open with ler_skill.
 function filesNote(source: string): string {
   try {
-    const dir = source.slice(0, source.lastIndexOf('/'))
+    const dir = dirname(source)
     const files = readdirSync(dir).filter((f) => /\.(md|txt|json|ya?ml|csv)$/.test(f) && f !== 'SKILL.md')
     return files.length
       ? `\n\n---\n${L('Arquivos de apoio desta skill (leia com ler_skill e o campo arquivo quando a receita mandar)', "This skill's supporting files (read them with ler_skill and the arquivo field when the recipe says so)")}: ${files.join(', ')}`
@@ -157,7 +158,7 @@ export class Skills {
       throw new Error(L('Não consegui ler essa skill.', "I couldn't read that skill."))
     }
     const fm = frontmatter(text)
-    const name = skillName(fm.name || source.split('/').at(-2) || '')
+    const name = skillName(fm.name || basename(dirname(source)) || '')
     if (!name) throw new Error(L('Essa skill não tem nome.', "That skill has no name."))
     if (this.active(name)) throw new Error(exists(name))
     const at = this.now()

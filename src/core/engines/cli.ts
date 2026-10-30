@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { isWin, killTree, spawnable } from '../platform'
 import type { EngineEvent } from './types'
 
 // A parser turns the CLI's JSONL stdout into engine events. It is pure so it
@@ -18,9 +19,12 @@ export async function* runCli(opts: {
   parser: Parser
   env?: NodeJS.ProcessEnv
 }): AsyncIterable<EngineEvent> {
-  const child = spawn(opts.bin, opts.args, { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: opts.env ?? process.env })
+  const s = spawnable(opts.bin, opts.args)
+  const child = spawn(s.file, s.args, { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: opts.env ?? process.env, windowsHide: true, windowsVerbatimArguments: s.verbatim })
   // A CLI that ignores SIGTERM (stuck on the network, say) gets SIGKILL, so a stop always ends the turn.
+  // On Windows the CLI may sit behind cmd.exe (an npm shim): only killing the tree reaches it.
   const kill = (): void => {
+    if (isWin && child.pid) return killTree(child.pid)
     child.kill('SIGTERM')
     setTimeout(() => child.exitCode === null && child.signalCode === null && child.kill('SIGKILL'), 5_000).unref()
   }
@@ -52,7 +56,10 @@ export async function* runCli(opts: {
     if (!opts.signal.aborted) yield* opts.parser.end(code, stderr)
   } finally {
     opts.signal.removeEventListener('abort', kill)
-    if (child.exitCode === null) child.kill('SIGTERM')
+    if (child.exitCode === null) {
+      if (isWin && child.pid) killTree(child.pid)
+      else child.kill('SIGTERM')
+    }
   }
 }
 

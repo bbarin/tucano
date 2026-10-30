@@ -7,6 +7,7 @@ import { num, parseJson, runCli } from './cli'
 import { opencodeParser, userOpencodeProviders } from './opencode'
 import type { EngineEvent, Turn, Usage } from './types'
 import { L } from '../../shared/lang'
+import { isWin, killTree, spawnable } from '../platform'
 
 // OpenCode 2 kept the `opencode` command and OPENCODE_CONFIG_CONTENT, but changed
 // the config to native V2 shapes (agents with system instead of the singular agent
@@ -69,17 +70,22 @@ export function sessionUsage(exported: string): Usage | undefined {
   }
 }
 
-const cli = (bin: string, args: string[], env: NodeJS.ProcessEnv, cwd: string): Promise<string> =>
-  new Promise((resolve) => execFile(bin, args, { env, cwd, timeout: 20_000 }, (_err, stdout) => resolve(String(stdout))))
+const cli = (bin: string, args: string[], env: NodeJS.ProcessEnv, cwd: string): Promise<string> => {
+  const s = spawnable(bin, args)
+  return new Promise((resolve) => execFile(s.file, s.args, { env, cwd, timeout: 20_000, windowsHide: true, windowsVerbatimArguments: s.verbatim }, (_err, stdout) => resolve(String(stdout))))
+}
 
 // `opencode serve` on a free local port, with a password of the turn's own.
 async function startServer(bin: string, env: NodeJS.ProcessEnv, cwd: string): Promise<{ url?: string; stop: () => Promise<void> }> {
-  const child = spawn(bin, ['serve', '--hostname', '127.0.0.1', '--port', '0'], { env, cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+  const s = spawnable(bin, ['serve', '--hostname', '127.0.0.1', '--port', '0'])
+  const child = spawn(s.file, s.args, { env, cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, windowsVerbatimArguments: s.verbatim })
   const exited = new Promise<void>((resolve) => child.on('close', () => resolve()))
   // With the app's MCP connection open it can linger on SIGTERM; the turn waits for it to end.
   const stop = async (): Promise<void> => {
     if (child.exitCode !== null || child.signalCode !== null) return
-    child.kill('SIGTERM')
+    // On Windows the server may sit behind cmd.exe or a node wrapper: only killing the tree reaches it.
+    if (isWin && child.pid) killTree(child.pid)
+    else child.kill('SIGTERM')
     const kill = setTimeout(() => child.kill('SIGKILL'), 2_000)
     await exited
     clearTimeout(kill)

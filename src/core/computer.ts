@@ -14,7 +14,7 @@ import { PROJECTS_DIR, type Agent, type Artifact, type ArtifactKind, type Comput
 import type { Db } from './db'
 import { textResult, type ToolDef } from './gateway'
 import { MacComputer, macTools } from './mac'
-import { osOf } from './platform'
+import { isWin, osOf } from './platform'
 
 export const IMAGE = 'node:22-bookworm'
 // Containers of another data directory (tests, a second install) never collide.
@@ -40,7 +40,8 @@ export function checkFolder(path: string, opts: { home?: string; dataDir: string
   const home = realpathSync(opts.home ?? homedir())
   if (!real.startsWith(home + sep)) return L('Só dá pra usar pastas dentro da sua pasta de usuário.', 'Only folders inside your home folder can be used.')
   const top = real.slice(home.length + 1).split(sep)[0]!
-  if (top === 'Library' || top.startsWith('.')) return L('Essa pasta guarda configurações e credenciais do sistema; não dá pra usar.', "That folder holds the system's settings and credentials; it can't be used.")
+  // Library on a Mac, AppData on Windows: settings, caches and credentials of every app.
+  if (top === 'Library' || top.toLowerCase() === 'appdata' || top.startsWith('.')) return L('Essa pasta guarda configurações e credenciais do sistema; não dá pra usar.', "That folder holds the system's settings and credentials; it can't be used.")
   const data = existsSync(opts.dataDir) ? realpathSync(opts.dataDir) : opts.dataDir
   if (data === real || data.startsWith(real + sep) || real.startsWith(data + sep)) return L('Essa pasta tem os dados do próprio Tucano; não dá pra usar.', "That folder holds Tucano's own data; it can't be used.")
   return null
@@ -755,8 +756,15 @@ export class Computers {
     const dir = join(this.deps.dataDir, 'artifacts', id)
     mkdirSync(dir, { recursive: true })
     if (file.containerPath) {
-      // `docker cp -L` resolves links inside the container and writes a plain file here.
-      const r = await docker(['cp', '-L', `${this.name(agentId)}:${file.containerPath}`, join(dir, name)], { timeoutMs: 120_000 })
+      // `docker cp -L` resolves links inside the container and writes a plain file here. Docker's
+      // Windows CLI resolves an absolute link target (/etc/hostname) against the link's folder,
+      // so there the path is resolved first, inside the container, and copied as a plain file.
+      let from = file.containerPath
+      if (isWin) {
+        const real = await docker(['exec', this.name(agentId), 'readlink', '-f', '--', from], { timeoutMs: 15_000 })
+        if (real.code === 0 && real.stdout.trim()) from = real.stdout.trim()
+      }
+      const r = await docker(['cp', '-L', `${this.name(agentId)}:${from}`, join(dir, name)], { timeoutMs: 120_000 })
       if (r.code !== 0) {
         rmSync(dir, { recursive: true, force: true })
         return { error: r.stderr.trim() || L(`Não achei ${file.containerPath}.`, `I couldn't find ${file.containerPath}.`) }

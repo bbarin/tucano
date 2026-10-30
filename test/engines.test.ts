@@ -218,7 +218,7 @@ describe('Codex exec stream', () => {
   })
 
   it('runs in the app\'s own home, so the user\'s AGENTS.md, skills and memories never load', () => {
-    expect(codexEnv('/data/codex-home')).toMatchObject({ HOME: '/data/codex-home', CODEX_HOME: '/data/codex-home/.codex' })
+    expect(codexEnv('/data/codex-home')).toMatchObject({ HOME: '/data/codex-home', CODEX_HOME: join('/data/codex-home', '.codex') })
   })
 
   it('gets the gateway as its only MCP server, with approval delegated to the gateway', () => {

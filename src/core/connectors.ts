@@ -170,6 +170,17 @@ export class ConnectorManager {
     } catch (e) {
       if (e instanceof UnauthorizedError || (e instanceof Error && /unauthorized|401/i.test(e.message))) {
         this.setStatus(id, 'needs_auth', interactive ? L('Conclua a autorização no navegador.', 'Finish the authorization in the browser.') : L('Precisa autorizar.', 'Needs authorization.'))
+      } else if (e instanceof Error && /dynamic client registration/i.test(e.message)) {
+        // GitHub's MCP server, for one: its OAuth only serves apps registered ahead of time, so a token is the way in.
+        await client.close().catch(() => {})
+        this.setStatus(
+          id,
+          'error',
+          L(
+            'Esse servidor não deixa apps se registrarem pelo navegador. Adicione de novo com autenticação por token (no GitHub: um token de acesso pessoal, em github.com/settings/personal-access-tokens).',
+            "This server doesn't let apps register through the browser. Add it again with token authentication (on GitHub: a personal access token, from github.com/settings/personal-access-tokens)."
+          )
+        )
       } else if (e instanceof Error && /timed out/i.test(e.message)) {
         await client.close().catch(() => {})
         this.setStatus(id, 'error', L(`O servidor não respondeu em ${CONNECT_TIMEOUT_MS / 1000} s. Confira o endereço e a sua rede.`, `The server didn't answer in ${CONNECT_TIMEOUT_MS / 1000} s. Check the address and your network.`))

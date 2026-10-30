@@ -280,8 +280,9 @@ export const CACHE_READ_WEIGHT = 0.1
 export const countedTokens = (u: { inputTokens: number; cacheReadTokens: number; outputTokens: number }): number =>
   Math.round(u.inputTokens - u.cacheReadTokens * (1 - CACHE_READ_WEIGHT) + u.outputTokens)
 
-export const ENGINES: Record<EngineId, { label: string; cli: string; login: string; install: string; site: string }> = {
-  claude: { label: 'Claude Code', cli: 'claude', login: 'claude auth login', install: 'curl -fsSL https://claude.ai/install.sh | bash', site: 'https://code.claude.com' },
+// `windows`: the install command for PowerShell, where the POSIX one doesn't run.
+export const ENGINES: Record<EngineId, { label: string; cli: string; login: string; install: string; windows?: string; site: string }> = {
+  claude: { label: 'Claude Code', cli: 'claude', login: 'claude auth login', install: 'curl -fsSL https://claude.ai/install.sh | bash', windows: 'irm https://claude.ai/install.ps1 | iex', site: 'https://code.claude.com' },
   codex: { label: 'Codex', cli: 'codex', login: 'codex login', install: 'npm install -g @openai/codex', site: 'https://github.com/openai/codex' },
   opencode: { label: 'OpenCode', cli: 'opencode', login: 'opencode auth login', install: 'curl -fsSL https://opencode.ai/install | bash', site: 'https://opencode.ai' },
   pi: { label: 'Pi', cli: 'pi', login: 'pi', install: 'npm install -g @earendil-works/pi-coding-agent', site: 'https://pi.dev' },

@@ -2,18 +2,19 @@
 
 What changed in each version of Tucano. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org) (while in 0.x, a minor version may change things). Each section is also the release's notes on GitHub, which is what the app's "What's new" link opens.
 
-## [Unreleased]
+## [0.2.0] - 2026-10-30
 
-> **Em português:** o Tucano agora roda no Linux, em x64 e ARM64: `.deb` pro Ubuntu e o Debian, AppImage pras outras distribuições, com a mesma atualização automática do Mac. Ao fechar a janela, ele fica na bandeja do sistema e as rotinas continuam rodando. O app passa a dizer "seu computador" em vez de "Mac".
+> **Em português:** o Tucano agora roda no Linux e no Windows. No Linux, em x64 e ARM64: `.deb` pro Ubuntu e o Debian, AppImage pras outras distribuições. No Windows 10 e 11, um comando no PowerShell instala sem pedir administrador e sem aviso do SmartScreen. Nos dois, ele se atualiza sozinho como no Mac, e ao fechar a janela fica na bandeja do sistema, com as rotinas rodando. O app passa a dizer "seu computador" em vez de "Mac". Obrigado ao Eduardo Souza pelo suporte ao Windows!
 
 ### Added
 
 - **Linux.** A `.deb` (Ubuntu, Debian and their family) and an AppImage (other distributions), for x64 and ARM64, that update themselves like the Mac app. `install.sh` installs on Linux too. On Linux, Sign in opens your desktop's terminal, closing the window keeps Tucano in the tray so routines go on, Open at login works, passwords go to the system keyring (GNOME Keyring or KWallet, never stored without one), Docker computers give the files they write back to you, and the agents' browser uses Google Chrome or Chromium. ([#5](https://github.com/eduwxyz/tucano/pull/5), [#6](https://github.com/eduwxyz/tucano/pull/6))
-- Tests run on macOS and Linux for every pull request. ([#4](https://github.com/eduwxyz/tucano/pull/4))
+- **Windows 10 and 11** (x64). In PowerShell, `irm https://github.com/eduwxyz/tucano/releases/latest/download/install.ps1 | iex` installs Tucano for your user, with no admin rights and no SmartScreen warning, and opens it; the installer is also in each release (it isn't code-signed). It updates itself like the Mac app. Harnesses installed with npm work, agents' commands on your PC run in Git Bash, Sign in opens a console, and closing the window keeps Tucano in the tray, by the clock. Thanks [@edusouza](https://github.com/edusouza)! ([#7](https://github.com/eduwxyz/tucano/pull/7), [#9](https://github.com/eduwxyz/tucano/pull/9))
+- Tests run on macOS, Linux and Windows for every pull request. ([#4](https://github.com/eduwxyz/tucano/pull/4), [#9](https://github.com/eduwxyz/tucano/pull/9))
 
 ### Changed
 
-- The app says "this computer" and "your computer" instead of the Mac, on every system. Agents are told their real system (macOS or Linux) and how things install there.
+- The app says "this computer" and "your computer" instead of the Mac, on every system. Agents are told their real system (macOS, Linux or Windows) and how things install there.
 - A new install no longer touches the system's vault when it first opens: the GitHub proxy key is made when you connect GitHub.
 
 ## [0.1.2] - 2026-10-28
@@ -51,7 +52,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
-[Unreleased]: https://github.com/eduwxyz/tucano/compare/v0.1.2...HEAD
+[0.2.0]: https://github.com/eduwxyz/tucano/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/eduwxyz/tucano/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/eduwxyz/tucano/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/eduwxyz/tucano/releases/tag/v0.1.0

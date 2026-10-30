@@ -12,6 +12,8 @@ import { autostartEntry, autostartFile, onPath } from '../core/platform'
 
 const NAME = 'Tucano'
 app.setName(NAME)
+// Windows shows notifications only for an app with an id, the same as the installer's.
+if (process.platform === 'win32') app.setAppUserModelId('dev.tucano.app')
 
 // Until the core says which language the person picked, the Mac's.
 const systemLocale = ((): string | undefined => {
@@ -29,6 +31,7 @@ if (!app.isPackaged && !process.env['TUCANO_DATA']) app.setPath('userData', join
 
 // The data from when the app was called agent-desk comes over first (see migrate.ts). If it
 // can't yet, the app opens on a scratch folder only to say why, and the data stays put.
+// Only on the Mac: agent-desk never shipped for Windows, and the key lives in the macOS Keychain.
 const moved: Moved =
   app.isPackaged && process.platform === 'darwin' && !process.env['TUCANO_DATA'] ? moveFromAgentDesk({ appData: app.getPath('appData'), dataDir: app.getPath('userData'), name: NAME, appPath: bundleOf(process.execPath) }) : 'nothing'
 if (moved === 'old-app-open' || moved === 'keychain-denied') app.setPath('userData', join(app.getPath('temp'), 'tucano-esperando'))
@@ -79,9 +82,11 @@ ipcMain.on('viewing', (_e, id: unknown) => {
 // you, two notes when the work is done. Never more than one at a time.
 let chirpedAt = 0
 const resource = (name: string): string => (app.isPackaged ? join(process.resourcesPath, name) : join(app.getAppPath(), 'build', name))
-// The system's own player: afplay on a Mac; on Linux PipeWire's or PulseAudio's, else ALSA's.
+// The system's own player: afplay on a Mac; on Windows .NET's SoundPlayer, with nothing
+// to install; on Linux PipeWire's or PulseAudio's, else ALSA's.
 const player = ((): ((file: string) => [string, string[]]) | null => {
   if (process.platform === 'darwin') return (f) => ['afplay', ['-v', '0.7', f]]
+  if (process.platform === 'win32') return (f) => ['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `(New-Object Media.SoundPlayer '${f.replace(/'/g, "''")}').PlaySync()`]]
   if (process.platform !== 'linux') return null
   if (onPath('pw-play')) return (f) => ['pw-play', ['--volume=0.7', f]]
   if (onPath('paplay')) return (f) => ['paplay', ['--volume=45875', f]]
@@ -92,7 +97,7 @@ function chirp(sound: 'chama' | 'pronto'): void {
   if (!player || Date.now() - chirpedAt < 1500) return
   chirpedAt = Date.now()
   const [bin, args] = player(join(resource('sounds'), `tucano-${sound}.wav`))
-  execFile(bin, args, () => {})
+  execFile(bin, args, { windowsHide: true }, () => {})
 }
 
 // While an agent is replying, the Mac doesn't go to sleep on its own (closing the lid still does).
@@ -112,15 +117,17 @@ function openAtLogin(open: boolean): void {
   }
 }
 
-// On Linux, closing the window keeps the app running (routines, triggers, Telegram),
-// as the Dock does on a Mac; the tray icon brings it back or quits it. A desktop
+// On Linux and Windows, closing the window keeps the app running (routines, triggers,
+// Telegram), as the Dock does on a Mac; the tray icon brings it back or quits it. A desktop
 // without a tray (plain GNOME) reopens it from the app menu: a second launch shows it.
 let tray: Tray | null = null
 let quitting = false
 let toldStillOpen = false
 function setTray(): void {
-  if (process.platform !== 'linux') return
-  tray ??= new Tray(nativeImage.createFromPath(resource('tray.png')).resize({ width: 22, height: 22 }))
+  if (process.platform === 'darwin') return
+  // Windows draws tray icons at 16 px (scaled up on a high-DPI screen); Linux panels at 22.
+  const size = process.platform === 'win32' ? 16 : 22
+  tray ??= new Tray(nativeImage.createFromPath(resource('tray.png')).resize({ width: size, height: size }))
   tray.setToolTip(NAME)
   tray.removeAllListeners('click')
   tray.on('click', () => showWindow())
@@ -135,12 +142,12 @@ function setTray(): void {
 // Linux shows a notification with the icon it's given (a Mac uses the app's own).
 const noteIcon = (): { icon?: string } => (process.platform === 'linux' ? { icon: resource('icon.png') } : {})
 function stillOpen(): void {
-  if (process.platform !== 'linux' || quitting || toldStillOpen || !Notification.isSupported()) return
+  if (process.platform === 'darwin' || quitting || toldStillOpen || !Notification.isSupported()) return
   toldStillOpen = true
   new Notification({
     ...noteIcon(),
     title: L(`O ${NAME} continua aberto`, `${NAME} is still open`),
-    body: L('As rotinas seguem rodando. Pra voltar, use o ícone do tucano na barra do sistema ou abra o Tucano de novo.', 'Routines keep running. To get back, use the toucan icon in the system bar or open Tucano again.'),
+    body: L('As rotinas seguem rodando. Pra voltar, use o ícone do tucano perto do relógio ou abra o Tucano de novo.', 'Routines keep running. To get back, use the toucan icon by the clock or open Tucano again.'),
     silent: true
   }).show()
 }
@@ -348,11 +355,14 @@ function createWindow(): BrowserWindow {
 
 // One app per data folder: two would both run the same routines. Opening it
 // again (Dock, Spotlight, at login) just brings the window back. A test run
-// with its own data folder is a separate app.
+// with its own data folder is a separate app. `Tucano --quit` (install.ps1, before
+// it replaces the app) asks the open one to quit as its tray menu does, and never
+// opens one itself.
 if (process.env['TUCANO_DATA']) app.setPath('userData', process.env['TUCANO_DATA'])
-const primary = app.requestSingleInstanceLock()
+const quitOnly = process.argv.includes('--quit')
+const primary = app.requestSingleInstanceLock() && !quitOnly
 if (!primary) app.quit()
-app.on('second-instance', () => showWindow())
+app.on('second-instance', (_e, argv) => (argv.includes('--quit') ? app.quit() : showWindow()))
 
 // The app's own menu, in the app's language (Electron's would be in English).
 function setMenu(): void {
@@ -412,9 +422,9 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
   })
 })
 
-// A Mac keeps the app in the Dock and Linux in the tray (see setTray); elsewhere it quits.
+// A Mac keeps the app in the Dock, Linux and Windows in the tray (see setTray); elsewhere it quits.
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin' && process.platform !== 'linux') app.quit()
+  if (!['darwin', 'linux', 'win32'].includes(process.platform)) app.quit()
 })
 
 app.on('before-quit', () => {

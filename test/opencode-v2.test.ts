@@ -89,7 +89,8 @@ const collect = async (it: AsyncIterable<EngineEvent>): Promise<EngineEvent[]> =
 }
 
 // These start real processes (the fake opencode, its server): give them room on a busy machine.
-describe('the OpenCode engine on V2', () => {
+// The fake is a shell script, which Windows can't run as a program.
+describe.skipIf(process.platform === 'win32')('the OpenCode engine on V2', () => {
   it("takes the turn's usage from the export and deletes the session", async () => {
     const oc = fakeOpencode()
     const events = await collect(opencodeEngine(() => oc.bin, mkdtempSync(join(tmpdir(), 'oc2-app-')), async () => ({}), () => '2.2.0').run(turn()))

@@ -61,7 +61,7 @@ function contents(dir: string): { files: string[]; scripts: boolean } {
         if (e.name === 'scripts') scripts = true
         if (depth < 2) walk(p, depth + 1)
       } else if (SCRIPT.has(extname(e.name))) scripts = true
-      else if (TEXT.has(extname(e.name)) && e.name !== 'SKILL.md') files.push(relative(dir, p))
+      else if (TEXT.has(extname(e.name)) && e.name !== 'SKILL.md') files.push(relative(dir, p).split(sep).join('/')) // the same on Windows: refs/a.md
     }
   }
   walk(dir, 0)

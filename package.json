@@ -1,6 +1,6 @@
 {
   "name": "tucano",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "private": true,
   "description": "Tucano: your team of AI agents on your computer, with scopes, approvals and budgets.",
   "homepage": "https://tucano.sh",
@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "dist": "sh scripts/dist.sh",
+    "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
     "install-app": "npm run dist && sh scripts/install-app.sh",
     "release": "sh scripts/release.sh"
   },
@@ -76,6 +77,18 @@
       "extendInfo": {
         "NSAppleEventsUsageDescription": "Tucano opens the Terminal for you when you ask it to."
       }
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "tucano-win-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "shortcutName": "Tucano"
     },
     "linux": {
       "target": [

@@ -81,7 +81,7 @@ describe('lent folders', () => {
   })
 
   it("gives Linux its own node_modules and .venv, never the Mac's, and mounts read-only when asked", () => {
-    const has = (p: string): boolean => p.endsWith('/py/.venv')
+    const has = (p: string): boolean => p.endsWith(join('/py', '.venv'))
     expect(mountArgs('c', [{ name: 'app', path: '/m/app', readOnly: false }], has)).toEqual(['-v', '/m/app:/projetos/app', '-v', 'c-app-node_modules:/projetos/app/node_modules'])
     expect(mountArgs('c', [{ name: 'py', path: '/m/py', readOnly: false }], has)).toContain('c-py-venv:/projetos/py/.venv')
     expect(mountArgs('c', [{ name: 'ro', path: '/m/ro', readOnly: true }], has)).toEqual(['-v', '/m/ro:/projetos/ro:ro'])

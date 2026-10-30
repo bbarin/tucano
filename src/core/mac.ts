@@ -14,7 +14,7 @@ import { L } from '../shared/lang'
 import type { CoreEvent } from '../shared/rpc'
 import type { Agent, Artifact, ComputerInfo, Service } from '../shared/types'
 import type { Db } from './db'
-import { fallbackPath, loginShell, osOf, systemName } from './platform'
+import { fallbackPath, isWin, killTree, loginShell, osOf, shellCommand, systemName } from './platform'
 import { textResult, type ToolDef } from './gateway'
 import { artifactKind, badName, edited, manyMatches, clipOutput, diedAtStart, emptyOld, fileText, formatExec, isBinary, linuxTools, noService, noShots, notInFile, notOpenYet, portTaken, seenImage, shown, tooBig, type Shooter, type ToolOutcome } from './computer'
 
@@ -23,12 +23,20 @@ const MAX_SHOW_BYTES = 50 * 1024 * 1024
 const RESERVED_PORTS = [47_717, 47_718] // the app's own webhook and git proxy
 
 // What the agent is told about this computer: the system, and what is usually installed.
-const installed = (): string => (osOf() === 'mac' ? 'Homebrew, Python, Node…' : 'apt, Python, Node…')
+const installed = (): string => ({ mac: 'Homebrew, Python, Node…', linux: 'apt, Python, Node…', windows: 'Python, Node, git…' })[osOf()]
+
+// On Windows, which shell the bash tool opens, so the model writes the right syntax.
+const windowsShell = (): string =>
+  !isWin
+    ? ''
+    : shellCommand('').kind === 'bash'
+      ? L(' Roda no Git Bash: sintaxe bash, caminhos como /c/Users ou C:/Users.', ' It runs in Git Bash: bash syntax, paths like /c/Users or C:/Users.')
+      : L(' Roda no cmd.exe: sintaxe do cmd, não bash.', ' It runs in cmd.exe: cmd syntax, not bash.')
 
 const macDescriptions = (): Record<string, string> => ({
   bash: L(
-    `Roda um comando no computador do usuário (${systemName()}, como o próprio usuário, com o que ele tem instalado: ${installed()}), por padrão na sua pasta de trabalho. Pra servidores que ficam rodando, use start_service.`,
-    `Runs a command on the user's computer (${systemName()}, as the user, with what they have installed: ${installed()}), by default in your working folder. For servers that keep running, use start_service.`
+    `Roda um comando no computador do usuário (${systemName()}, como o próprio usuário, com o que ele tem instalado: ${installed()}), por padrão na sua pasta de trabalho.${windowsShell()} Pra servidores que ficam rodando, use start_service.`,
+    `Runs a command on the user's computer (${systemName()}, as the user, with what they have installed: ${installed()}), by default in your working folder.${windowsShell()} For servers that keep running, use start_service.`
   ),
   read_file: L('Lê um arquivo de texto deste computador.', 'Reads a text file from this computer.'),
   write_file: L('Cria ou sobrescreve um arquivo neste computador, criando as pastas que faltarem.', 'Creates or overwrites a file on this computer, creating any missing folders.'),
@@ -69,7 +77,7 @@ export const macTools = (): ToolDef[] => {
 // A path as the agent writes it, on this computer.
 export function macPath(p: string, cwd: string): string {
   const s = p.trim()
-  if (s === '~' || s.startsWith('~/')) return normalize(join(homedir(), s.slice(1)))
+  if (s === '~' || s.startsWith('~/') || (isWin && s.startsWith('~\\'))) return normalize(join(homedir(), s.slice(1)))
   return normalize(isAbsolute(s) ? s : join(cwd, s))
 }
 
@@ -80,6 +88,9 @@ type Exec = { code: number; stdout: string; stderr: string }
 // nothing of the app's process goes along.
 let envOnce: Promise<NodeJS.ProcessEnv> | undefined
 export function loginEnv(): Promise<NodeJS.ProcessEnv> {
+  // Windows has no login shell to ask: every app already gets the user's full
+  // environment (PATH included, spelled Path there). What the app itself added stays out.
+  if (isWin) envOnce ??= Promise.resolve({ HOME: homedir(), ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(TUCANO_|ELECTRON_|VITE_)/i.test(k) && k !== 'NODE_OPTIONS')) })
   envOnce ??= new Promise((resolve) => {
     const base: NodeJS.ProcessEnv = {
       HOME: homedir(),
@@ -114,22 +125,20 @@ export function loginEnv(): Promise<NodeJS.ProcessEnv> {
 function run(command: string, opts: { cwd: string; env: NodeJS.ProcessEnv; timeoutSeconds: number; signal?: AbortSignal }): Promise<Exec> {
   return new Promise((resolve) => {
     // Its own process group, so a timeout or a stop takes the children with it.
-    const child = spawn('/bin/bash', ['-c', command], { cwd: opts.cwd, env: { ...opts.env, TERM: 'dumb' }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    // (On Windows, detached would open a console window; taskkill finds the tree anyway.)
+    const sh = shellCommand(command, { ...opts.env, TERM: 'dumb' })
+    const child = spawn(sh.file, sh.args, { cwd: opts.cwd, env: sh.env, detached: !isWin, windowsHide: true, windowsVerbatimArguments: sh.verbatim, stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     let timedOut = false
     child.stdout.setEncoding('utf8').on('data', (d: string) => (stdout = (stdout + d).slice(-2_000_000)))
     child.stderr.setEncoding('utf8').on('data', (d: string) => (stderr = (stderr + d).slice(-200_000)))
     const killGroup = (sig: NodeJS.Signals): void => {
-      try {
-        if (child.pid) process.kill(-child.pid, sig)
-      } catch {
-        /* already gone */
-      }
+      if (child.pid) killTree(child.pid, sig)
     }
     const stop = (): void => {
       killGroup('SIGTERM')
-      setTimeout(() => killGroup('SIGKILL'), 5000).unref()
+      if (!isWin) setTimeout(() => killGroup('SIGKILL'), 5000).unref() // taskkill is already forceful
     }
     const timer = setTimeout(() => ((timedOut = true), stop()), opts.timeoutSeconds * 1000)
     opts.signal?.addEventListener('abort', stop, { once: true })
@@ -217,18 +226,15 @@ export class MacComputer {
     const pid = this.pid(agentId, name)
     let stopped = true
     if (pid && alive(pid)) {
-      try {
-        process.kill(-pid, 'SIGTERM')
-      } catch {
-        stopped = false
-      }
-      for (let i = 0; i < 6 && alive(pid); i++) await new Promise((r) => setTimeout(r, 500))
-      if (alive(pid))
+      if (isWin) killTree(pid)
+      else
         try {
-          process.kill(-pid, 'SIGKILL')
+          process.kill(-pid, 'SIGTERM')
         } catch {
-          /* gone */
+          stopped = false
         }
+      for (let i = 0; i < 6 && alive(pid); i++) await new Promise((r) => setTimeout(r, 500))
+      if (alive(pid)) killTree(pid, 'SIGKILL')
     }
     rmSync(this.pidFile(agentId, name), { force: true })
     this.deps.db.removeServices(agentId, name)
@@ -268,7 +274,8 @@ export class MacComputer {
     mkdirSync(dirname(this.pidFile(agent.id, name)), { recursive: true })
     const log = join(logs, `${name}.log`)
     const fd = openSync(log, 'w')
-    const child = spawn('/bin/bash', ['-c', command], { cwd, env: { ...(await this.env()), TERM: 'dumb' }, detached: true, stdio: ['ignore', fd, fd] })
+    const sh = shellCommand(command, { ...(await this.env()), TERM: 'dumb' })
+    const child = spawn(sh.file, sh.args, { cwd, env: sh.env, detached: !isWin, windowsHide: true, windowsVerbatimArguments: sh.verbatim, stdio: ['ignore', fd, fd] })
     closeSync(fd)
     child.unref()
     if (!child.pid) return { result: textResult(L('Não consegui iniciar o processo.', "I couldn't start the process."), true) }
@@ -283,7 +290,7 @@ export class MacComputer {
     this.refresh(agent)
     let tail = ''
     try {
-      tail = readFileSync(log, 'utf8').split('\n').slice(-30).join('\n').trim()
+      tail = readFileSync(log, 'utf8').split(/\r?\n/).slice(-30).join('\n').trim()
     } catch {
       /* no log */
     }
