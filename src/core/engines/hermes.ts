@@ -212,6 +212,8 @@ export function hermesEngine(bin: () => string | undefined, appDir: string, shel
       const user = userHermesProviders()
       const provider = rest.length ? prefix : ((user['model'] as Record<string, unknown> | undefined)?.['provider'] as string | undefined)
       const model = rest.length ? rest.join('/') : turn.model
+      // A cold root cannot even start the CLI: wait for its dependencies.
+      await warmHermes(path, appDir)
       const home = hermesHome(appDir, turn)
       // Provider keys may live in the user's shell (an SSO helper prints the
       // token), which an app opened from Finder doesn't get.
@@ -221,14 +223,25 @@ export function hermesEngine(bin: () => string | undefined, appDir: string, shel
   }
 }
 
-// Build the shared dependency environment once, at detection: a first real
-// turn would otherwise pay ~20s of bootstrap, and two agents starting together
-// would race over one build (the loser exits with "an update is still
-// running"). Runs the package manager against the root home — no model is
-// called, so nothing is spent; errors are fine (the first turn retries).
-export function warmHermes(bin: string, appDir: string): void {
+// Build the shared dependency environment, once per root. Detection starts it
+// early (a warm root makes the first turn quick) and every run waits for it: on
+// a cold root the CLI dies on its own imports ("No module named 'ruamel'"),
+// which is what a person got testing the harness right after opening the app.
+// One promise per root, so turns starting together share a build instead of
+// racing over it ("an update is still running"). No model is called, nothing is
+// spent; a failed repair is not remembered, so the next run tries again.
+const warming = new Map<string, Promise<void>>()
+
+export function warmHermes(bin: string, appDir: string): Promise<void> {
+  const running = warming.get(appDir)
+  if (running) return running
   const { execFile } = require('node:child_process') as typeof import('node:child_process')
-  execFile(bin, ['pm', 'repair'], { timeout: 300_000, env: { ...process.env, HERMES_HOME: appDir } }, () => {
-    // best effort: the first turn pays the bootstrap if this failed
+  const done = new Promise<void>((resolve) => {
+    execFile(bin, ['pm', 'repair'], { timeout: 300_000, env: { ...process.env, HERMES_HOME: appDir } }, (err) => {
+      if (err) warming.delete(appDir)
+      resolve()
+    })
   })
+  warming.set(appDir, done)
+  return done
 }

@@ -205,7 +205,7 @@ export async function detectHermes(): Promise<{ status: EngineStatus; models: st
   const path = await which('hermes')
   if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
   const v = await run(path, ['--version'])
-  warmHermes(path, hermesAppDir())
+  void warmHermes(path, hermesAppDir()) // started early; every run waits for it
   const models = parseHermesModels(undefined, hermesEndpointProviders(userHermesProviders()['providers'] as Record<string, unknown> | undefined))
   // What the cache lists is what the person can use; the status is the list.
   return { status: listedStatus(path, v.stdout, models, 'hermes setup'), models }

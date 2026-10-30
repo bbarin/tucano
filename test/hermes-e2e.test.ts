@@ -7,7 +7,6 @@
 //   TUCANO_HERMES_E2E=1 npx vitest run test/hermes-e2e.test.ts
 // Skipped unless the variable is set AND `hermes` is on the PATH — a Hermes
 // install is not a CI given, and a 0.21 install cannot run it (no daemon).
-import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server as HttpServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -17,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { hermesEngine, hermesHome } from '../src/core/engines/hermes'
 import { Gateway, textResult, type ToolDef } from '../src/core/gateway'
 
-const MCP_NAME = 'listar_tarefas'
+const MCP_NAME = 'list_tasks'
 // Hermes namespaces a server's tools for the model: `mcp__<server>__<tool>`.
 // The call it makes back to the server uses the raw name.
 const MODEL_NAME = `mcp__tucano__${MCP_NAME}`
@@ -81,13 +80,6 @@ function fakeModel(): Promise<{ url: string; close: () => void; calls: () => num
   })
 }
 
-function runCli(binPath: string, args: string[], env: NodeJS.ProcessEnv): Promise<number> {
-  return new Promise((resolve) => {
-    const child = spawn(binPath, args, { env, stdio: 'ignore' })
-    child.on('exit', (code) => resolve(code ?? 1))
-  })
-}
-
 describe.skipIf(!enabled)('the Hermes engine end to end', () => {
   it('runs a tool the app gave it, through the CLI gateway and back', async () => {
     const root = mkdtempSync(join(tmpdir(), 'tucano-hermes-e2e-'))
@@ -96,7 +88,7 @@ describe.skipIf(!enabled)('the Hermes engine end to end', () => {
     const gateway = new Gateway()
     await gateway.start()
     const called: string[] = []
-    gateway.agentTurn('iris', { tools: [TOOL], call: async (name) => (called.push(name), textResult('2 tarefas: café e pão')) })
+    gateway.agentTurn('iris', { tools: [TOOL], call: async (name) => (called.push(name), textResult('2 tasks: coffee and bread')) })
 
     const previous = process.env['HERMES_HOME']
     process.env['HERMES_HOME'] = userHome
@@ -104,18 +96,16 @@ describe.skipIf(!enabled)('the Hermes engine end to end', () => {
       // The person's own config: a provider pointed at the fake model.
       writeFileSync(join(userHome, 'config.yaml'), `providers:\n  probe:\n    base_url: ${model.url}\n    api_mode: chat_completions\n    api_key_env: PROBE_KEY\nmodel:\n  provider: probe\n`)
 
-      // The warmup the app runs at detection: without a dependency environment
-      // on the root, the profile's first turn dies before the daemon starts.
-      const warm = await runCli(bin!, ['pm', 'repair'], { ...process.env, HERMES_HOME: root })
-      expect(warm).toBe(0)
+      // Nothing warms this root first: a cold root used to die on the CLI's own
+      // imports ("No module named 'ruamel'"), so the engine has to prepare it.
 
-      const home = hermesHome(root, { system: 'Você é a Iris, agente do Tucano.', mcpUrl: gateway.agentUrl('iris'), web: false, agentKey: 'iris' }, userHome)
+      const home = hermesHome(root, { system: 'You are Iris, a Tucano agent.', mcpUrl: gateway.agentUrl('iris'), web: false, agentKey: 'iris' }, userHome)
       expect(home).toContain(join('profiles', 'iris'))
 
       const events = []
       for await (const ev of hermesEngine(() => bin, root).run({
-        model: 'probe/probe-model', effort: 'low', system: 'Você é a Iris, agente do Tucano.',
-        prompt: 'liste minhas tarefas', blocks: ['liste minhas tarefas'], images: [], cwd: userHome,
+        model: 'probe/probe-model', effort: 'low', system: 'You are Iris, a Tucano agent.',
+        prompt: 'list my tasks', blocks: ['list my tasks'], images: [], cwd: userHome,
         agentKey: 'iris', signal: new AbortController().signal, mcpUrl: gateway.agentUrl('iris'), web: false
       })) {
         events.push(ev)
@@ -126,7 +116,7 @@ describe.skipIf(!enabled)('the Hermes engine end to end', () => {
       expect(done).toBeDefined()
       // The model only says this after reading the tool result back, so the
       // app's payload made the whole round trip.
-      expect((done as { text: string }).text).toContain('2 tarefas: café e pão')
+      expect((done as { text: string }).text).toContain('2 tasks: coffee and bread')
       // And the call really reached the app's gateway: the handler ran, under
       // the raw tool name (the namespaced one is the model's view).
       expect(called).toEqual([MCP_NAME])

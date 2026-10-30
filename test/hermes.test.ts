@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import { describe, expect, it } from 'vitest'
-import { hermesArgs, hermesEnv, hermesHome, hermesParser, userHermesProviders } from '../src/core/engines/hermes'
+import { hermesArgs, hermesEnv, hermesHome, hermesParser, userHermesProviders, warmHermes } from '../src/core/engines/hermes'
 import { hermesEndpointProviders, parseHermesModels } from '../src/core/engines/detect'
 
 // Fixture is real CLI output (`hermes chat --format stream-json`, Hermes 2026-10-29), trimmed.
@@ -78,7 +78,7 @@ describe('hermes setup', () => {
     writeFileSync(join(userHome, 'auth.json'), '{}')
     writeFileSync(join(userHome, '.env'), 'CUSTOM_API_KEY=x')
     const appDir = mkdtempSync(join(tmpdir(), 'hh-'))
-    const home = hermesHome(appDir, { system: 'Você é a Iris.', mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false, agentKey: 'iris' }, userHome)
+    const home = hermesHome(appDir, { system: 'You are Iris.', mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false, agentKey: 'iris' }, userHome)
     expect(home).toContain(join('profiles', 'iris')) // one profile home per Tucano agent
     expect(lstatSync(join(home, 'auth.json')).isSymbolicLink()).toBe(true)
     expect(lstatSync(join(home, '.env')).isSymbolicLink()).toBe(true)
@@ -98,8 +98,8 @@ describe('hermes setup', () => {
   it("makes the agent Tucano's: the instructions are the home's SOUL.md", () => {
     const appDir = mkdtempSync(join(tmpdir(), 'hs-'))
     const userHome = mkdtempSync(join(tmpdir(), 'hu4-'))
-    const home = hermesHome(appDir, { system: 'Você é a Iris.', mcpUrl: undefined, web: false, agentKey: 'iris' }, userHome)
-    expect(readFileSync(join(home, 'SOUL.md'), 'utf8')).toBe('Você é a Iris.')
+    const home = hermesHome(appDir, { system: 'You are Iris.', mcpUrl: undefined, web: false, agentKey: 'iris' }, userHome)
+    expect(readFileSync(join(home, 'SOUL.md'), 'utf8')).toBe('You are Iris.')
     // the skills the CLI would seed come from an empty folder next to the homes
     expect(existsSync(join(appDir, 'no-skills'))).toBe(true)
     // the turn env points the CLI at that empty skills source and the agent home
@@ -169,5 +169,26 @@ describe('hermes setup', () => {
     // --provider takes); an endpoint that is in no config falls back to its host.
     expect(parseHermesModels(join(dir, 'provider_models_cache.json'), providers)).toEqual(['copilot/gpt-5.4', 'copilot/claude-sonnet-5', 'acme/deepseek-v4-flash', 'broken/m'])
     expect(parseHermesModels(join(dir, 'missing.json'))).toEqual([])
+  })
+
+  it('builds the dependency environment once per root, and a run waits for it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hw-'))
+    const log = join(dir, 'calls.txt')
+    const bin = join(dir, 'hermes')
+    writeFileSync(bin, `#!/bin/sh\necho "$@" >> "${log}"\nsleep 0.2\n`, { mode: 0o755 })
+    const first = warmHermes(bin, dir)
+    expect(warmHermes(bin, dir)).toBe(first) // one build per root, not per caller
+    await first
+    expect(readFileSync(log, 'utf8').trim()).toBe('pm repair')
+  })
+
+  it('tries again when a repair fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hf-'))
+    const log = join(dir, 'calls.txt')
+    const bin = join(dir, 'hermes')
+    writeFileSync(bin, `#!/bin/sh\necho x >> "${log}"\nexit 1\n`, { mode: 0o755 })
+    await warmHermes(bin, dir)
+    await warmHermes(bin, dir)
+    expect(readFileSync(log, 'utf8').trim().split('\n')).toHaveLength(2)
   })
 })
