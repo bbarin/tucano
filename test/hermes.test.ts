@@ -79,7 +79,7 @@ describe('hermes setup', () => {
     writeFileSync(join(userHome, '.env'), 'CUSTOM_API_KEY=x')
     const appDir = mkdtempSync(join(tmpdir(), 'hh-'))
     const home = hermesHome(appDir, { system: 'Você é a Iris.', mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false, agentKey: 'iris' }, userHome)
-    expect(home).toContain(join('agents', 'iris')) // one home per Tucano agent
+    expect(home).toContain(join('profiles', 'iris')) // one profile home per Tucano agent
     expect(lstatSync(join(home, 'auth.json')).isSymbolicLink()).toBe(true)
     expect(lstatSync(join(home, '.env')).isSymbolicLink()).toBe(true)
     const c = parseYaml(readFileSync(join(home, 'config.yaml'), 'utf8')) as Record<string, unknown>
@@ -106,14 +106,22 @@ describe('hermes setup', () => {
     expect(hermesEnv(appDir, home, { PATH: '/x' })).toEqual({ PATH: '/x', HERMES_HOME: home, HERMES_BUNDLED_SKILLS: join(appDir, 'no-skills') })
   })
 
-  it('shares the heavy environment across agents (one build, not one per turn)', () => {
+  it('lays the root out as the CLI expects and inherits the heavy environment from it', () => {
     const appDir = mkdtempSync(join(tmpdir(), 'he2-'))
     const userHome = mkdtempSync(join(tmpdir(), 'hu5-'))
     const a = hermesHome(appDir, { system: 'a', mcpUrl: undefined, web: false, agentKey: 'a' }, userHome)
     const b = hermesHome(appDir, { system: 'b', mcpUrl: undefined, web: false, agentKey: 'b' }, userHome)
     expect(a).not.toBe(b)
-    expect(lstatSync(join(a, 'installs')).isSymbolicLink()).toBe(true)
-    expect(lstatSync(join(b, 'installs')).isSymbolicLink()).toBe(true)
+    // the root is a Hermes home with a versioned config; profiles live under profiles/
+    const rc = parseYaml(readFileSync(join(appDir, 'config.yaml'), 'utf8')) as Record<string, unknown>
+    expect(rc['_config_version']).toBe(12)
+    expect(rc['gateway']).toEqual({ unmanaged_idle_exit_seconds: 600 })
+    // the per-agent home carries the gates, not the root
+    const ca = parseYaml(readFileSync(join(a, 'config.yaml'), 'utf8')) as Record<string, unknown>
+    expect(ca['_config_version']).toBe(12)
+    expect(ca['memory']).toEqual({ memory_enabled: false, user_profile_enabled: false })
+    const cb = parseYaml(readFileSync(join(b, 'config.yaml'), 'utf8')) as Record<string, unknown>
+    expect(cb['memory']).toEqual({ memory_enabled: false, user_profile_enabled: false })
   })
 
   it('turns the web on as the only built-in toolset', () => {

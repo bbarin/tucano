@@ -128,29 +128,32 @@ function linkOrCopy(target: string, at: string): void {
   }
 }
 
-// The app's own Hermes homes. One per Tucano agent (turn.agentKey): sessions,
-// memory and schedules stay that agent's, and overlapping turns never share a
-// home — a single home made two concurrent agents race over one dependency
-// build and read each other's gateway URL (the config is rewritten per turn).
-// The heavy dependency environment (installs/, tools/) is built once for all
-// agents and linked into each home; a per-agent rebuild would take ~20s of the
-// first turn. The agent's instructions go to SOUL.md (identity slot #1, so the
-// agent is Tucano's, not Hermes'), rewritten every turn because a fresh home
-// gets seeded with a default one. JSON is valid YAML, so the config is written
-// with JSON.stringify.
+// The app's own Hermes root, laid out the way the CLI's one-gateway-per-host
+// runtime (0.22+) expects: the root itself is the default home (it carries the
+// root config with `_config_version`), and each Tucano agent is a named
+// profile under profiles/ — one shared daemon serves them all, and every turn
+// runs scoped to its profile's home (config, SOUL.md, secrets). `agents/`
+// would not qualify as profiles: the CLI counts a home as a profile only under
+// `<root>/profiles/`. The agent's instructions go to SOUL.md (identity slot
+// #1, so the agent is Tucano's, not Hermes'), rewritten every turn because a
+// fresh home gets seeded with a default one. JSON is valid YAML, so the
+// configs are written with JSON.stringify.
 export function hermesHome(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' | 'web' | 'agentKey'>, userHome = userHomeOf()): string {
-  // Only the router runs without an agent key; it gets a home of its own.
+  // Only the router runs without an agent key; it gets a profile of its own.
   const key = (turn.agentKey ?? 'router').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'router'
-  const home = join(appDir, 'agents', key)
-  mkdirSync(home, { recursive: true })
-
-  // The dependency environment and tool store, built once for every agent and
-  // linked in; without a link the CLI rebuilds them per home.
-  for (const shared of ['installs', 'tools']) {
-    mkdirSync(join(appDir, shared), { recursive: true })
-    const at = join(home, shared)
-    if (!existsSync(at)) linkOrCopy(join(appDir, shared), at)
+  mkdirSync(appDir, { recursive: true })
+  // The root must look like a Hermes home (the profiles resolver requires it)
+  // and pass the CLI's config migration.
+  const rootConfig: Record<string, unknown> = {
+    _config_version: 12,
+    approvals: { mode: 'off' },
+    gateway: { unmanaged_idle_exit_seconds: 600 },
+    ...userHermesProviders(userHome)
   }
+  writeFileSync(join(appDir, 'config.yaml'), JSON.stringify(rootConfig, null, 2))
+
+  const home = join(appDir, 'profiles', key)
+  mkdirSync(home, { recursive: true })
 
   const auth = join(home, 'auth.json')
   if (!existsSync(auth) && existsSync(join(userHome, 'auth.json'))) linkOrCopy(join(userHome, 'auth.json'), auth)
@@ -163,6 +166,7 @@ export function hermesHome(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' 
   writeFileSync(join(home, 'SOUL.md'), turn.system)
 
   const config: Record<string, unknown> = {
+    _config_version: 12,
     approvals: { mode: 'off' }, // the gateway decides what runs
     // No built-in tools (shell, files); web search and page reading only when
     // the agent has the web. The app's gateway is the only MCP server.
@@ -219,9 +223,9 @@ export function hermesEngine(bin: () => string | undefined, appDir: string, shel
 
 // Build the shared dependency environment once, at detection: a first real
 // turn would otherwise pay ~20s of bootstrap, and two agents starting together
-// would race over the same build (the loser exits with "an update is still
-// running"). Runs the package manager against the shared base home — no model
-// is called, so nothing is spent; errors are fine (the first turn retries).
+// would race over one build (the loser exits with "an update is still
+// running"). Runs the package manager against the root home — no model is
+// called, so nothing is spent; errors are fine (the first turn retries).
 export function warmHermes(bin: string, appDir: string): void {
   const { execFile } = require('node:child_process') as typeof import('node:child_process')
   execFile(bin, ['pm', 'repair'], { timeout: 300_000, env: { ...process.env, HERMES_HOME: appDir } }, () => {
