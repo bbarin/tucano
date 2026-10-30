@@ -115,7 +115,11 @@ describe('hermes setup', () => {
     // the root is a Hermes home with a versioned config; profiles live under profiles/
     const rc = parseYaml(readFileSync(join(appDir, 'config.yaml'), 'utf8')) as Record<string, unknown>
     expect(rc['_config_version']).toBe(12)
-    expect(rc['gateway']).toEqual({ unmanaged_idle_exit_seconds: 600 })
+    // The CLI's own gateway daemon is unavoidable in 0.22, so its life is bounded
+    // instead: it idles out instead of staying up after the app closes.
+    expect(rc['gateway']).toEqual({ unmanaged_idle_exit_seconds: 120 })
+    // Hermes' scheduler stays out of it: no agent-created jobs, no catch-up.
+    expect(rc['cron']).toEqual({ allow_agent_scheduling: false, catch_up_missed: false })
     // the per-agent home carries the gates, not the root
     const ca = parseYaml(readFileSync(join(a, 'config.yaml'), 'utf8')) as Record<string, unknown>
     expect(ca['_config_version']).toBe(12)

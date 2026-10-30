@@ -7,6 +7,7 @@
 //   TUCANO_HERMES_E2E=1 npx vitest run test/hermes-e2e.test.ts
 // Skipped unless the variable is set AND `hermes` is on the PATH — a Hermes
 // install is not a CI given, and a 0.21 install cannot run it (no daemon).
+import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server as HttpServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -80,6 +81,40 @@ function fakeModel(): Promise<{ url: string; close: () => void; calls: () => num
   })
 }
 
+function runCli(binPath: string, args: string[], env: NodeJS.ProcessEnv): Promise<number> {
+  return new Promise((resolve) => {
+    spawn(binPath, args, { env, stdio: 'ignore' }).on('exit', (code) => resolve(code ?? 1))
+  })
+}
+
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// The pid the CLI recorded for the daemon serving this root (nothing else).
+function daemonPid(root: string): number | undefined {
+  try {
+    return (JSON.parse(readFileSync(join(root, 'gateway.pid'), 'utf8')) as { pid?: number }).pid
+  } catch {
+    return undefined
+  }
+}
+
+// Stop the daemon the way the app can: the CLI's own `gateway stop`, scoped to
+// the home it runs in. SIGTERM is only a last resort so a probe never leaks one.
+async function stopDaemon(binPath: string, root: string): Promise<void> {
+  const pid = daemonPid(root)
+  if (!pid) return
+  await runCli(binPath, ['gateway', 'stop'], { ...process.env, HERMES_HOME: root })
+  for (let i = 0; i < 100 && alive(pid); i++) await new Promise((r) => setTimeout(r, 200))
+  if (alive(pid)) process.kill(pid, 'SIGTERM')
+}
+
 describe.skipIf(!enabled)('the Hermes engine end to end', () => {
   it('runs a tool the app gave it, through the CLI gateway and back', async () => {
     const root = mkdtempSync(join(tmpdir(), 'tucano-hermes-e2e-'))
@@ -121,30 +156,22 @@ describe.skipIf(!enabled)('the Hermes engine end to end', () => {
       // the raw tool name (the namespaced one is the model's view).
       expect(called).toEqual([MCP_NAME])
       expect(model.calls()).toBeGreaterThanOrEqual(2)
+
+      // A turn leaves the CLI's own gateway daemon behind, and in 0.22 there is
+      // no switch to turn it off: every turn goes through that runtime and the
+      // profiles layout is built on it. So what the app owes is that stopping it
+      // leaves nothing behind — the process goes and its pid file goes with it.
+      // The idle exit in the generated config (2 minutes) bounds the case where
+      // nobody asks.
+      const pid = daemonPid(root)
+      expect(pid).toBeGreaterThan(0)
+      expect(alive(pid!)).toBe(true)
+      await stopDaemon(bin!, root)
+      expect(alive(pid!)).toBe(false)
+      expect(existsSync(join(root, 'gateway.pid'))).toBe(false)
     } finally {
       process.env['HERMES_HOME'] = previous
-      // The CLI's daemon is a host-scoped singleton: stop the one this test
-      // started (by its own record) and let it finish writing before the temp
-      // root goes away — a tree it is still touching cannot be removed.
-      const pidFile = join(root, 'gateway.pid')
-      if (existsSync(pidFile)) {
-        try {
-          const { pid } = JSON.parse(readFileSync(pidFile, 'utf8')) as { pid?: number }
-          if (pid) {
-            process.kill(pid, 'SIGTERM')
-            for (let i = 0; i < 100; i++) {
-              try {
-                process.kill(pid, 0)
-              } catch {
-                break // gone
-              }
-              await new Promise((r) => setTimeout(r, 200))
-            }
-          }
-        } catch {
-          // already gone
-        }
-      }
+      await stopDaemon(bin!, root)
       await gateway.stop()
       model.close()
       rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })

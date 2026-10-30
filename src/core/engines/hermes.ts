@@ -143,11 +143,20 @@ export function hermesHome(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' 
   const key = (turn.agentKey ?? 'router').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'router'
   mkdirSync(appDir, { recursive: true })
   // The root must look like a Hermes home (the profiles resolver requires it)
-  // and pass the CLI's config migration.
+  // and pass the CLI's config migration. The CLI's own gateway daemon is part
+  // of 0.22's runtime (every turn goes through it, and it multiplexes the
+  // profiles), so an agent can't run without one; it is scoped to this root —
+  // its pid file records this home — and it leaves on its own, 2 minutes idle,
+  // so it never outlives the app by long. A restart on a warm root measured
+  // 4 s, against 24 s for a cold root's first bootstrap.
+  // Nothing of Hermes' own scheduler runs behind the app: an agent can't create
+  // jobs, and a missed run is dropped instead of caught up. Routines are the
+  // app's, with its approvals and limits.
   const rootConfig: Record<string, unknown> = {
     _config_version: 12,
     approvals: { mode: 'off' },
-    gateway: { unmanaged_idle_exit_seconds: 600 },
+    gateway: { unmanaged_idle_exit_seconds: 120 },
+    cron: { allow_agent_scheduling: false, catch_up_missed: false },
     ...userHermesProviders(userHome)
   }
   writeFileSync(join(appDir, 'config.yaml'), JSON.stringify(rootConfig, null, 2))
