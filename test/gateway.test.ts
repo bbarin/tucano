@@ -2,6 +2,10 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Gateway, textResult, type ToolDef } from '../src/core/gateway'
+import { setLang } from '../src/shared/lang'
+
+// The app speaks both; assert the English side of its messages.
+setLang('en')
 
 const tool = (name: string): ToolDef => ({ name, description: name, inputSchema: { type: 'object', properties: {} } })
 
@@ -40,7 +44,7 @@ describe('Gateway', () => {
     gateway.agentTurn('iris', { tools: [tool('list_issues')], call: async (name) => (calls.push(name), textResult(`ran ${name}`)) })
     const client = await connect(gateway.agentUrl('iris'))
     expect(await client.callTool({ name: 'list_issues', arguments: {} })).toMatchObject({ content: [{ text: 'ran list_issues' }] })
-    expect(await client.callTool({ name: 'merge_pull_request', arguments: {} })).toMatchObject({ isError: true, content: [{ text: 'Ferramenta não permitida: merge_pull_request' }] })
+    expect(await client.callTool({ name: 'merge_pull_request', arguments: {} })).toMatchObject({ isError: true, content: [{ text: 'Tool not allowed: merge_pull_request' }] })
     expect(calls).toEqual(['list_issues'])
     await client.close()
   })
