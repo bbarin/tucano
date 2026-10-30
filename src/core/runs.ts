@@ -990,6 +990,7 @@ export class Runner {
         blocks,
         images,
         cwd,
+        agentKey: agent.id,
         signal: control.ctl.signal,
         mcpUrl: session?.url,
         web: agent.web !== false

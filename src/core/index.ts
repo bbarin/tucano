@@ -16,7 +16,7 @@ import { claudeEngine, userProvider } from './engines/claude'
 import { codexEngine, userCodexProvider } from './engines/codex'
 import { opencodeEngine } from './engines/opencode'
 import { piEngine } from './engines/pi'
-import { hermesEngine } from './engines/hermes'
+import { hermesAppDir, hermesEngine } from './engines/hermes'
 import { adoptLoginShellPath, detectEngines } from './engines/detect'
 import { fakeEngine } from './engines/fake'
 import type { Engine } from './engines/types'
@@ -107,7 +107,7 @@ const engineImpls: Record<EngineId, Engine> = fake
       codex: codexEngine(() => engines.codex.path, codexHome, loginEnv, async () => quietCodex(userCodexProvider())),
       opencode: opencodeEngine(() => engines.opencode.path, join(dataDir, 'opencode-home'), loginEnv, () => engines.opencode.version),
       pi: piEngine(() => engines.pi.path, join(dataDir, 'pi'), loginEnv),
-      hermes: hermesEngine(() => engines.hermes.path, join(dataDir, 'hermes'), loginEnv)
+      hermes: hermesEngine(() => engines.hermes.path, hermesAppDir(), loginEnv)
     }
 
 // A command in the login shell, where SSO tools live; what it prints, trimmed.

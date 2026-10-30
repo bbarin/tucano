@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import { describe, expect, it } from 'vitest'
-import { hermesArgs, hermesHome, hermesParser, userHermesProviders } from '../src/core/engines/hermes'
+import { hermesArgs, hermesEnv, hermesHome, hermesParser, userHermesProviders } from '../src/core/engines/hermes'
 import { hermesEndpointProviders, parseHermesModels } from '../src/core/engines/detect'
 
 // Fixture is real CLI output (`hermes chat --format stream-json`, Hermes 2026-10-29), trimmed.
@@ -33,8 +33,8 @@ describe('hermes', () => {
 
   it('reports an error result', () => {
     const p = hermesParser()
-    p.line('{"type":"result","session_id":"x","exit_code":1,"text":"","tokens":{"input":0,"output":0,"total":0,"cache_read":0,"cache_write":0},"error":"No provider for genplat"}')
-    expect(p.end(0, '')).toEqual([{ type: 'error', message: 'No provider for genplat' }])
+    p.line('{"type":"result","session_id":"x","exit_code":1,"text":"","tokens":{"input":0,"output":0,"total":0,"cache_read":0,"cache_write":0},"error":"No provider for acme"}')
+    expect(p.end(0, '')).toEqual([{ type: 'error', message: 'No provider for acme' }])
   })
 
   it('reports an error when the process exits without a result', () => {
@@ -54,46 +54,71 @@ describe('hermes', () => {
 
 describe('hermes setup', () => {
   it('runs the oneshot protocol with the model, effort and stdin query', () => {
-    expect(hermesArgs({ model: 'genplat/deepseek-v4-flash-official', effort: 'high', images: [] })).toEqual([
+    expect(hermesArgs({ model: 'acme/deepseek-v4-flash-official', effort: 'high', images: [] })).toEqual([
       'chat',
       '--format',
       'stream-json',
       '--query-file',
       '-',
-      '--ignore-rules',
       '--reasoning',
       'high',
       '-m',
-      'genplat/deepseek-v4-flash-official'
+      'acme/deepseek-v4-flash-official'
     ])
   })
 
   it('names the provider of a bare model id from the user config, and attaches the newest existing image only', () => {
-    const args = hermesArgs({ model: 'deepseek-v4-flash-official', effort: 'low', images: [{ block: 0, path: '/tmp/inexistente.png', mime: 'image/png' }] }, 'genplat')
-    expect(args).toEqual(['chat', '--format', 'stream-json', '--query-file', '-', '--ignore-rules', '--reasoning', 'low', '-m', 'deepseek-v4-flash-official', '--provider', 'genplat'])
+    const args = hermesArgs({ model: 'deepseek-v4-flash-official', effort: 'low', images: [{ block: 0, path: '/tmp/inexistente.png', mime: 'image/png' }] }, 'acme')
+    expect(args).toEqual(['chat', '--format', 'stream-json', '--query-file', '-', '--reasoning', 'low', '-m', 'deepseek-v4-flash-official', '--provider', 'acme'])
   })
 
-  it('builds an isolated home with the gateway, the web when allowed, and the user providers', () => {
+  it('builds a per-agent home with the gateway, the web when allowed, and the user providers', () => {
     const userHome = mkdtempSync(join(tmpdir(), 'hu-'))
-    writeFileSync(join(userHome, 'config.yaml'), 'providers:\n  genplat:\n    base_url: https://llm.acme.com/v1\n    api_mode: chat_completions\nmcp_servers:\n  atlassian:\n    command: uvx\nmodel:\n  provider: genplat\n')
+    writeFileSync(join(userHome, 'config.yaml'), 'providers:\n  acme:\n    base_url: https://llm.acme.com/v1\n    api_mode: chat_completions\nmcp_servers:\n  atlassian:\n    command: uvx\nmodel:\n  provider: acme\n')
     writeFileSync(join(userHome, 'auth.json'), '{}')
     writeFileSync(join(userHome, '.env'), 'CUSTOM_API_KEY=x')
     const appDir = mkdtempSync(join(tmpdir(), 'hh-'))
-    const home = hermesHome(appDir, { system: 'Você é a Iris.', mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false }, userHome)
+    const home = hermesHome(appDir, { system: 'Você é a Iris.', mcpUrl: 'http://127.0.0.1:1/mcp/x', web: false, agentKey: 'iris' }, userHome)
+    expect(home).toContain(join('agents', 'iris')) // one home per Tucano agent
     expect(lstatSync(join(home, 'auth.json')).isSymbolicLink()).toBe(true)
     expect(lstatSync(join(home, '.env')).isSymbolicLink()).toBe(true)
     const c = parseYaml(readFileSync(join(home, 'config.yaml'), 'utf8')) as Record<string, unknown>
     expect(c['approvals']).toEqual({ mode: 'off' })
     expect(c['platform_toolsets']).toEqual({ cli: [] }) // no built-in tools, no web
+    expect(c['tools']).toEqual({ tool_search: { enabled: 'off' } }) // the gateway's tools reach the model directly
+    expect(c['memory']).toEqual({ memory_enabled: false, user_profile_enabled: false }) // no memories behind the app's back
+    expect(c['skills']).toEqual({ auto_load: [], project_discovery: false })
+    expect(c['auxiliary']).toEqual({ background_review: { enabled: false }, title_generation: { enabled: false } }) // no model call per turn outside the receipts
     expect(c['mcp_servers']).toEqual({ tucano: { url: 'http://127.0.0.1:1/mcp/x' } })
-    expect(c['providers']).toEqual({ genplat: { base_url: 'https://llm.acme.com/v1', api_mode: 'chat_completions' } })
-    expect(c['model']).toEqual({ provider: 'genplat' })
+    expect(c['providers']).toEqual({ acme: { base_url: 'https://llm.acme.com/v1', api_mode: 'chat_completions' } })
+    expect(c['model']).toEqual({ provider: 'acme' })
     expect(Object.keys(c['mcp_servers'] as object)).not.toContain('atlassian')
+  })
+
+  it("makes the agent Tucano's: the instructions are the home's SOUL.md", () => {
+    const appDir = mkdtempSync(join(tmpdir(), 'hs-'))
+    const userHome = mkdtempSync(join(tmpdir(), 'hu4-'))
+    const home = hermesHome(appDir, { system: 'Você é a Iris.', mcpUrl: undefined, web: false, agentKey: 'iris' }, userHome)
+    expect(readFileSync(join(home, 'SOUL.md'), 'utf8')).toBe('Você é a Iris.')
+    // the skills the CLI would seed come from an empty folder next to the homes
+    expect(existsSync(join(appDir, 'no-skills'))).toBe(true)
+    // the turn env points the CLI at that empty skills source and the agent home
+    expect(hermesEnv(appDir, home, { PATH: '/x' })).toEqual({ PATH: '/x', HERMES_HOME: home, HERMES_BUNDLED_SKILLS: join(appDir, 'no-skills') })
+  })
+
+  it('shares the heavy environment across agents (one build, not one per turn)', () => {
+    const appDir = mkdtempSync(join(tmpdir(), 'he2-'))
+    const userHome = mkdtempSync(join(tmpdir(), 'hu5-'))
+    const a = hermesHome(appDir, { system: 'a', mcpUrl: undefined, web: false, agentKey: 'a' }, userHome)
+    const b = hermesHome(appDir, { system: 'b', mcpUrl: undefined, web: false, agentKey: 'b' }, userHome)
+    expect(a).not.toBe(b)
+    expect(lstatSync(join(a, 'installs')).isSymbolicLink()).toBe(true)
+    expect(lstatSync(join(b, 'installs')).isSymbolicLink()).toBe(true)
   })
 
   it('turns the web on as the only built-in toolset', () => {
     const appDir = mkdtempSync(join(tmpdir(), 'hw-'))
-    const home = hermesHome(appDir, { system: 's', mcpUrl: undefined, web: true }, mkdtempSync(join(tmpdir(), 'hu2-')))
+    const home = hermesHome(appDir, { system: 's', mcpUrl: undefined, web: true, agentKey: 'w' }, mkdtempSync(join(tmpdir(), 'hu2-')))
     const c = parseYaml(readFileSync(join(home, 'config.yaml'), 'utf8')) as Record<string, unknown>
     expect(c['platform_toolsets']).toEqual({ cli: ['web'] })
     expect(c['mcp_servers']).toBeUndefined()
@@ -101,18 +126,23 @@ describe('hermes setup', () => {
 
   it("takes only the providers from the user's config.yaml", () => {
     const userHome = mkdtempSync(join(tmpdir(), 'hu3-'))
-    writeFileSync(join(userHome, 'config.yaml'), 'providers:\n  genplat:\n    base_url: https://x/v1\napprovals:\n  mode: manual\n')
-    expect(userHermesProviders(userHome)).toEqual({ providers: { genplat: { base_url: 'https://x/v1' } } })
+    writeFileSync(join(userHome, 'config.yaml'), 'providers:\n  acme:\n    base_url: https://x/v1\napprovals:\n  mode: manual\n')
+    expect(userHermesProviders(userHome)).toEqual({ providers: { acme: { base_url: 'https://x/v1' } } })
     expect(userHermesProviders(join(tmpdir(), 'vazio-'))).toEqual({})
   })
 
-  it('rewrites the home every turn (the gateway changes with it)', () => {
+  it('rewrites each agent home every turn (the gateway changes with it), without crossing agents', () => {
     const appDir = mkdtempSync(join(tmpdir(), 'he-'))
-    hermesHome(appDir, { system: 's1', mcpUrl: 'http://127.0.0.1:1/mcp/a', web: false })
-    const home = hermesHome(appDir, { system: 's2', mcpUrl: undefined, web: false })
+    hermesHome(appDir, { system: 's1', mcpUrl: 'http://127.0.0.1:1/mcp/a', web: false, agentKey: 'iris' })
+    const home = hermesHome(appDir, { system: 's2', mcpUrl: undefined, web: false, agentKey: 'iris' })
     const c = parseYaml(readFileSync(join(home, 'config.yaml'), 'utf8')) as Record<string, unknown>
     expect(existsSync(join(home, 'config.yaml'))).toBe(true)
     expect(c['mcp_servers']).toBeUndefined() // the last turn's gateway is gone
+    expect(readFileSync(join(home, 'SOUL.md'), 'utf8')).toBe('s2')
+    // a second agent's home is untouched
+    const other = hermesHome(appDir, { system: 'other', mcpUrl: 'http://127.0.0.1:1/mcp/b', web: false, agentKey: 'rafa' })
+    const c2 = parseYaml(readFileSync(join(other, 'config.yaml'), 'utf8')) as Record<string, unknown>
+    expect(c2['mcp_servers']).toEqual({ tucano: { url: 'http://127.0.0.1:1/mcp/b' } })
   })
 
   it('reads the model ids from the provider cache', () => {
@@ -126,10 +156,10 @@ describe('hermes setup', () => {
         'custom:https://broken#z': { fp: 'z', at: 3, models: ['m'] }
       })
     )
-    const providers = hermesEndpointProviders({ genplat: { base_url: 'https://llm.acme.com/api/v2/' } })
+    const providers = hermesEndpointProviders({ acme: { base_url: 'https://llm.acme.com/api/v2/' } })
     // The person's own endpoint is labelled with its config key (that is what
     // --provider takes); an endpoint that is in no config falls back to its host.
-    expect(parseHermesModels(join(dir, 'provider_models_cache.json'), providers)).toEqual(['copilot/gpt-5.4', 'copilot/claude-sonnet-5', 'genplat/deepseek-v4-flash', 'broken/m'])
+    expect(parseHermesModels(join(dir, 'provider_models_cache.json'), providers)).toEqual(['copilot/gpt-5.4', 'copilot/claude-sonnet-5', 'acme/deepseek-v4-flash', 'broken/m'])
     expect(parseHermesModels(join(dir, 'missing.json'))).toEqual([])
   })
 })

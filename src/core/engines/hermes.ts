@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { parse as parseYaml } from 'yaml'
@@ -10,11 +10,12 @@ import { L } from '../../shared/lang'
 
 // Hermes is the agent CLI the app itself runs on. It reads AGENTS.md, SOUL.md,
 // skills, plugins, MCP servers and sessions from its home, and keeps every
-// session in a database there. So the app runs it with a home of its own
-// (HERMES_HOME, see hermesHome), and brings in only the person's providers
-// (the `providers` block of their config.yaml) and their logins (.env and
-// auth.json, linked so a refreshed login stays theirs). The app's gateway,
-// when given, is the only MCP server: its tools are what the agent gets.
+// session in a database there. So the app gives each Tucano agent a home of
+// its own (HERMES_HOME, see hermesHome) and brings in only the person's
+// providers (the `providers` block of their config.yaml) and their logins
+// (.env and auth.json, linked so a refreshed login stays theirs). The app's
+// gateway, when given, is the only MCP server: its tools are what the agent
+// gets.
 
 // One JSON event per line: system/init, text deltas, tool_use/tool_result, and
 // one terminal result with the whole turn's tokens (or an error). The answer
@@ -64,19 +65,19 @@ export function hermesParser(): Parser {
 
 const REASONING: Record<Effort, string> = { low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh' }
 
-// One-shot JSONL on stdout; the query comes from stdin ('-'). No AGENTS.md,
-// SOUL.md, memory or preloaded skills. The provider is named explicitly (a
-// bare model id otherwise falls back to a provider the person never picked);
-// the system prompt rides in HERMES_ENVIRONMENT_HINT (the home's config has
-// no prompt mechanism that reaches a one-shot run). The CLI's --image takes
-// one path (repeating it keeps the last), so the newest image rides along.
+// One-shot JSONL on stdout; the query comes from stdin ('-'). The agent's
+// instructions ride in the home's SOUL.md (identity slot #1: it replaces the
+// CLI's own identity — an env hint would only describe the environment, and
+// would repeat SOUL.md). The provider is named explicitly (a bare model id
+// otherwise falls back to a provider the person never picked); the CLI's
+// --image takes one path (repeating it keeps the last), so the newest image
+// rides along.
 export function hermesArgs(turn: Pick<Turn, 'model' | 'effort' | 'images'>, provider?: string): string[] {
   const image = [...(turn.images ?? [])].reverse().find((i) => existsSync(i.path))
   return [
     'chat',
     '--format', 'stream-json',
     '--query-file', '-',
-    '--ignore-rules',
     '--reasoning', REASONING[turn.effort],
     '-m', turn.model,
     ...(provider ? ['--provider', provider] : []),
@@ -85,6 +86,10 @@ export function hermesArgs(turn: Pick<Turn, 'model' | 'effort' | 'images'>, prov
 }
 
 const userHomeOf = (): string => process.env['HERMES_HOME'] || join(homedir(), '.hermes')
+
+// Where the app keeps the Hermes homes: a base home for the shared dependency
+// environment, and one home per agent under it.
+export const hermesAppDir = (): string => process.env['TUCANO_DATA'] ? join(process.env['TUCANO_DATA'], 'hermes') : join(process.cwd(), '.tucano', 'hermes')
 
 // The user's provider config, from their ~/.hermes/config.yaml: the `providers`
 // block (a company gateway, a custom endpoint) and which one their model
@@ -109,26 +114,83 @@ function userHermesConfig(userHome: string): Record<string, unknown> {
   }
 }
 
-// The app's own Hermes home: a fresh config every turn (the gateway URL changes
-// with it), the person's logins linked so a refreshed login stays theirs.
-// JSON is valid YAML, so the config is written with JSON.stringify.
-export function hermesHome(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' | 'web'>, userHome = userHomeOf()): string {
-  const home = join(appDir, 'home')
+// A link where one is possible (auth and logins must stay the person's), a
+// plain copy where the platform refuses links (Windows without privileges).
+function linkOrCopy(target: string, at: string): void {
+  try {
+    symlinkSync(target, at)
+  } catch {
+    try {
+      copyFileSync(target, at)
+    } catch {
+      // neither link nor copy: the CLI starts without it
+    }
+  }
+}
+
+// The app's own Hermes homes. One per Tucano agent (turn.agentKey): sessions,
+// memory and schedules stay that agent's, and overlapping turns never share a
+// home — a single home made two concurrent agents race over one dependency
+// build and read each other's gateway URL (the config is rewritten per turn).
+// The heavy dependency environment (installs/, tools/) is built once for all
+// agents and linked into each home; a per-agent rebuild would take ~20s of the
+// first turn. The agent's instructions go to SOUL.md (identity slot #1, so the
+// agent is Tucano's, not Hermes'), rewritten every turn because a fresh home
+// gets seeded with a default one. JSON is valid YAML, so the config is written
+// with JSON.stringify.
+export function hermesHome(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' | 'web' | 'agentKey'>, userHome = userHomeOf()): string {
+  // Only the router runs without an agent key; it gets a home of its own.
+  const key = (turn.agentKey ?? 'router').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'router'
+  const home = join(appDir, 'agents', key)
   mkdirSync(home, { recursive: true })
+
+  // The dependency environment and tool store, built once for every agent and
+  // linked in; without a link the CLI rebuilds them per home.
+  for (const shared of ['installs', 'tools']) {
+    mkdirSync(join(appDir, shared), { recursive: true })
+    const at = join(home, shared)
+    if (!existsSync(at)) linkOrCopy(join(appDir, shared), at)
+  }
+
   const auth = join(home, 'auth.json')
-  if (!existsSync(auth) && existsSync(join(userHome, 'auth.json'))) symlinkSync(join(userHome, 'auth.json'), auth)
+  if (!existsSync(auth) && existsSync(join(userHome, 'auth.json'))) linkOrCopy(join(userHome, 'auth.json'), auth)
   const dotenv = join(home, '.env')
-  if (!existsSync(dotenv) && existsSync(join(userHome, '.env'))) symlinkSync(join(userHome, '.env'), dotenv)
+  if (!existsSync(dotenv) && existsSync(join(userHome, '.env'))) linkOrCopy(join(userHome, '.env'), dotenv)
+
+  // The agent is Tucano's: its instructions replace the CLI's identity. The
+  // CLI re-seeds the person's bundled skills into the home at every startup
+  // (HERMES_BUNDLED_SKILLS, see hermesEnv), so nothing to remove here.
+  writeFileSync(join(home, 'SOUL.md'), turn.system)
+
   const config: Record<string, unknown> = {
     approvals: { mode: 'off' }, // the gateway decides what runs
     // No built-in tools (shell, files); web search and page reading only when
     // the agent has the web. The app's gateway is the only MCP server.
     platform_toolsets: { cli: turn.web ? ['web'] : [] },
+    // The gateway's tools reach the model directly (tool_search would defer
+    // them behind a search bridge no Tucano tool ever surfaces through).
+    tools: { tool_search: { enabled: 'off' } },
+    // Nothing of the person's is learned or reviewed behind the app's back:
+    // no memories written, no skills patched, no post-turn review.
+    memory: { memory_enabled: false, user_profile_enabled: false },
+    skills: { auto_load: [], project_discovery: false },
+    auxiliary: { background_review: { enabled: false }, title_generation: { enabled: false } },
     ...(turn.mcpUrl ? { mcp_servers: { [GATEWAY_NAME]: { url: turn.mcpUrl } } } : {}),
     ...userHermesProviders(userHome)
   }
   writeFileSync(join(home, 'config.yaml'), JSON.stringify(config, null, 2))
+  // Where the CLI looks for skills to seed into a home: an empty folder, so
+  // the person's own catalog never leaks into the agent (verified: a run with
+  // this set seeds nothing and completes).
+  mkdirSync(join(appDir, 'no-skills'), { recursive: true })
   return home
+}
+
+// The env a hermes turn runs with: the agent's home, and an empty skills
+// source (HERMES_BUNDLED_SKILLS) so the CLI seeds none of the person's
+// catalog into the home (verified: a run with this set seeds nothing).
+export function hermesEnv(appDir: string, home: string, base: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return { ...base, HERMES_HOME: home, HERMES_BUNDLED_SKILLS: join(appDir, 'no-skills') }
 }
 
 // The model is "<provider>/<model>" as the picker lists it; the CLI wants the
@@ -147,10 +209,22 @@ export function hermesEngine(bin: () => string | undefined, appDir: string, shel
       const provider = rest.length ? prefix : ((user['model'] as Record<string, unknown> | undefined)?.['provider'] as string | undefined)
       const model = rest.length ? rest.join('/') : turn.model
       const home = hermesHome(appDir, turn)
-      // Provider keys may live in the user's shell (a key_cmd like tompero),
-      // which an app opened from Finder doesn't get.
-      const env = { ...process.env, ...(await shellEnv()), HERMES_HOME: home, HERMES_ENVIRONMENT_HINT: turn.system }
+      // Provider keys may live in the user's shell (an SSO helper prints the
+      // token), which an app opened from Finder doesn't get.
+      const env = hermesEnv(appDir, home, { ...process.env, ...(await shellEnv()) })
       yield* runCli({ bin: path, args: hermesArgs({ ...turn, model }, provider), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: hermesParser(), env })
     }
   }
+}
+
+// Build the shared dependency environment once, at detection: a first real
+// turn would otherwise pay ~20s of bootstrap, and two agents starting together
+// would race over the same build (the loser exits with "an update is still
+// running"). Runs the package manager against the shared base home — no model
+// is called, so nothing is spent; errors are fine (the first turn retries).
+export function warmHermes(bin: string, appDir: string): void {
+  const { execFile } = require('node:child_process') as typeof import('node:child_process')
+  execFile(bin, ['pm', 'repair'], { timeout: 300_000, env: { ...process.env, HERMES_HOME: appDir } }, () => {
+    // best effort: the first turn pays the bootstrap if this failed
+  })
 }

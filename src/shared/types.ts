@@ -285,7 +285,7 @@ export const ENGINES: Record<EngineId, { label: string; cli: string; login: stri
   codex: { label: 'Codex', cli: 'codex', login: 'codex login', install: 'npm install -g @openai/codex', site: 'https://github.com/openai/codex' },
   opencode: { label: 'OpenCode', cli: 'opencode', login: 'opencode auth login', install: 'curl -fsSL https://opencode.ai/install | bash', site: 'https://opencode.ai' },
   pi: { label: 'Pi', cli: 'pi', login: 'pi', install: 'npm install -g @earendil-works/pi-coding-agent', site: 'https://pi.dev' },
-  hermes: { label: 'Hermes', cli: 'hermes', login: 'hermes setup', install: 'See https://hermes-agent.nousresearch.com/docs', site: 'https://hermes-agent.nousresearch.com' }
+  hermes: { label: 'Hermes', cli: 'hermes', login: 'hermes setup', install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash', site: 'https://hermes-agent.nousresearch.com' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
 

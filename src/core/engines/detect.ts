@@ -8,7 +8,7 @@ import type { EngineId, EngineStatus } from '../../shared/types'
 import { userProvider } from './claude'
 import { codexEnv, userCodexProvider } from './codex'
 import { opencodeMajor } from './opencode-v2'
-import { userHermesProviders } from './hermes'
+import { hermesAppDir, userHermesProviders, warmHermes } from './hermes'
 
 function run(bin: string, args: string[], timeout = 15_000, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
@@ -151,8 +151,8 @@ export async function detectPi(): Promise<{ status: EngineStatus; models: string
 // The model ids Hermes can run, from its provider cache: one entry per
 // credential (a provider slug, or `custom:<url>#<fingerprint>` for an endpoint
 // in the person's config), each with the models its catalog lists. A custom
-// endpoint is labelled with the config key it belongs to (genplat), not the
-// host: that is the name the CLI routes with.
+// endpoint is labelled with the config key it belongs to, not the host: that
+// is the name the CLI routes with.
 export function parseHermesModels(
   file = join(process.env['HERMES_HOME'] || join(homedir(), '.hermes'), 'provider_models_cache.json'),
   providers: Record<string, string> = {}
@@ -200,6 +200,7 @@ export async function detectHermes(): Promise<{ status: EngineStatus; models: st
   const path = await which('hermes')
   if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
   const v = await run(path, ['--version'])
+  warmHermes(path, hermesAppDir())
   const models = parseHermesModels(undefined, hermesEndpointProviders(userHermesProviders()['providers'] as Record<string, unknown> | undefined))
   // What the cache lists is what the person can use; the status is the list.
   return { status: listedStatus(path, v.stdout, models, 'hermes setup'), models }
