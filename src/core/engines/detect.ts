@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process'
 import { access, constants } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { L } from '../../shared/lang'
 import type { EngineId, EngineStatus } from '../../shared/types'
@@ -7,6 +9,7 @@ import { executableNames, isWin, pathDirs, spawnable } from '../platform'
 import { userProvider } from './claude'
 import { codexEnv, userCodexProvider } from './codex'
 import { opencodeMajor } from './opencode-v2'
+import { geminiModels } from './gemini'
 
 function run(bin: string, args: string[], timeout = 15_000, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
@@ -150,7 +153,29 @@ export async function detectPi(): Promise<{ status: EngineStatus; models: string
   return { status: listedStatus(path, v.stdout, models, 'pi (e /login)'), models }
 }
 
+// Gemini CLI. Its model list isn't offered by an offline command, so the known
+// current models are used; "signed in" is whether a login is in place — the
+// OAuth credentials in the home, or an API key / Vertex in the environment.
+export async function detectGemini(): Promise<{ status: EngineStatus; models: string[] }> {
+  const path = await which('gemini')
+  if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
+  const v = await run(path, ['--version'])
+  const home = process.env['GEMINI_CLI_HOME'] || join(homedir(), '.gemini')
+  const signedIn = existsSync(join(home, 'oauth_creds.json')) || !!(process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'] || process.env['GOOGLE_GENAI_USE_VERTEXAI'])
+  const models = geminiModels()
+  return {
+    status: {
+      installed: true,
+      path,
+      version: version(v.stdout),
+      loggedIn: signedIn,
+      ...(signedIn ? { route: 'providers' as const, account: `Google · ${models.length} ${L('modelos', 'models')}` } : { account: L('Sem login: entre com gemini', 'Not signed in: sign in with gemini') })
+    },
+    models: signedIn ? models : []
+  }
+}
+
 export async function detectEngines(codexHome: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>> }> {
-  const [claude, codex, opencode, pi] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi()])
-  return { engines: { claude, codex, opencode: opencode.status, pi: pi.status }, listed: { opencode: opencode.models, pi: pi.models } }
+  const [claude, codex, opencode, pi, gemini] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectGemini()])
+  return { engines: { claude, codex, opencode: opencode.status, pi: pi.status, gemini: gemini.status }, listed: { opencode: opencode.models, pi: pi.models, gemini: gemini.models } }
 }
