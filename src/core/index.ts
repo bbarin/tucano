@@ -46,6 +46,8 @@ import { seed } from './seed'
 
 const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
 const fake = process.env['TUCANO_FAKE_ENGINES'] === '1'
+// Run by the server (src/server): no window, and the screens are in a browser elsewhere.
+const serverMode = process.env['TUCANO_SERVER'] === '1'
 mkdirSync(dataDir, { recursive: true })
 
 const db = new Db(join(dataDir, 'tucano.db'))
@@ -206,7 +208,9 @@ process.parentPort.on('message', (e) => {
   if (r.error !== undefined) p?.reject(new Error(r.error))
   else p?.resolve(Buffer.from(String(r.data ?? ''), 'base64'))
 })
-const shoot: Shooter = (opts) =>
+// On a server there's no Electron: the agents' Chrome takes the picture instead.
+const shoot: Shooter = (opts) => (serverMode && chrome ? chrome.shot(opts) : electronShoot(opts))
+const electronShoot: Shooter = (opts) =>
   new Promise((resolve, reject) => {
     const id = randomUUID()
     shots.set(id, { resolve, reject })
@@ -227,7 +231,8 @@ const chrome =
         join(dataDir, 'navegador'),
         (agentId, shown) => browser.setShown(agentId, shown),
         undefined,
-        (agentId, jpeg) => browser.frame(agentId, jpeg)
+        (agentId, jpeg) => browser.frame(agentId, jpeg),
+        serverMode
       )
     : undefined
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
@@ -246,7 +251,8 @@ const connectors = new ConnectorManager({
   db,
   secrets,
   emit,
-  openUrl: (url) => toMain({ type: 'open', url }),
+  // On a server there's nothing to open it in: authorizeConnector hands it to the page.
+  openUrl: (url) => serverMode || toMain({ type: 'open', url }),
   oauthCallbackUrl: () => gateway.url('/oauth/callback')
 })
 gateway.route('/oauth/callback', async (url) => {
@@ -690,7 +696,11 @@ const api: Api = {
 
   removeConnector: ({ id }) => void connectors.remove(id),
   reconnectConnector: ({ id }) => void connectors.connect(id),
-  authorizeConnector: ({ id }) => void connectors.authorize(id),
+  authorizeConnector: async ({ id }) => {
+    const url = await connectors.authorize(id)
+    return serverMode && url ? { url } : {}
+  },
+  finishConnectorAuth: ({ url }) => connectors.finishOAuthFromUrl(url),
   harnessMcps: async () => (await foundMcps()).map(publicMcp),
   importHarnessMcp: async ({ key }) => {
     const m = (await foundMcps()).find((x) => x.key === key)
@@ -721,6 +731,12 @@ const api: Api = {
     void run().catch((e: unknown) => console.error('[computer]', e))
   },
   stopService: ({ agentId, name }) => void computers.stopService(agentId, name),
+  // Driving a taken-over browser from the panel (Tucano as a server: no window to open).
+  browserInput: async ({ agentId, input }) => {
+    if (!serverMode || !chrome) throw new Error(L('Só no Tucano em servidor.', 'Only on Tucano as a server.'))
+    await chrome.run(agentId, 'input', input)
+  },
+
   browserAction: ({ agentId, action }) => {
     const agent = db.agent(agentId)
     if (agent) void browser.action(agent, action).catch((e: unknown) => console.error('[navegador]', e))

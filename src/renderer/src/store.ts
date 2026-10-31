@@ -7,6 +7,7 @@ import {
   MODELS,
   modelInfo,
   type EngineId,
+  type BrowserInput,
   type Agent,
   type Approval,
   type Artifact,
@@ -78,7 +79,7 @@ export interface State {
   demoServer?: { command: string; args: string[] }
 }
 
-export type Dialog = { kind: 'members' | 'rename' | 'topic'; id: string } | { kind: 'archived' | 'new-channel' | 'search' }
+export type Dialog = { kind: 'members' | 'rename' | 'topic'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'oauth'; id: string; url: string }
 
 export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string }
 
@@ -369,7 +370,10 @@ export const updateTool = (connectorId: string, name: string, patch: Partial<Pic
 export const addConnector = (input: ConnectorInput): Promise<string> => call('addConnector', { input })
 export const removeConnector = (id: string): void => void call('removeConnector', { id })
 export const reconnectConnector = (id: string): void => void call('reconnectConnector', { id })
-export const authorizeConnector = (id: string): void => void call('authorizeConnector', { id })
+// On a server the authorization page comes back to be opened here, then pasted back.
+export const authorizeConnector = (id: string): void =>
+  void call('authorizeConnector', { id }).then((r) => r.url && openDialog({ kind: 'oauth', id, url: r.url }))
+export const finishConnectorAuth = (url: string): Promise<boolean> => call('finishConnectorAuth', { url })
 export const harnessMcps = (): Promise<HarnessMcp[]> => call('harnessMcps')
 export const importHarnessMcp = (key: string): Promise<string> => call('importHarnessMcp', { key })
 
@@ -415,7 +419,16 @@ export const computerAction = (agentId: string, action: 'start' | 'restart' | 'e
   void call('computerAction', { agentId, action })
 export const stopService = (agentId: string, name: string): void => void call('stopService', { agentId, name })
 export const browserAction = (agentId: string, action: 'show' | 'hide' | 'clear'): void => void call('browserAction', { agentId, action })
-export const openExternal = (url: string): void => void call('openExternal', { url })
+// Tucano as a server: the page is in a browser and the agent's has no window, so I
+// drive it from its picture in the panel.
+export const windowless = (): boolean => !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__
+// A page an agent serves, as this browser reaches it: on a server, at the server's
+// address (it passes running services through on a private network).
+export const reachable = (url: string): string => (windowless() ? url.replace(/^http:\/\/127\.0\.0\.1:/, `http://${location.hostname}:`) : url)
+export const browserInput = (agentId: string, input: BrowserInput): void => void call('browserInput', { agentId, input }).catch(() => {})
+// In a browser (Tucano as a server) the page opens it itself: the server has no screen.
+export const openExternal = (url: string): void =>
+  (window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__ ? void window.open(url, '_blank', 'noopener') : void call('openExternal', { url })
 
 export const saveRoutine = (routine: RoutineInput): Promise<Routine> => call('saveRoutine', { routine })
 export const setJevKey = (key: string | null): Promise<void> => call('setJevKey', { key })
