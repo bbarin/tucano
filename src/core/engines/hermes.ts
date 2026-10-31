@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -244,7 +245,6 @@ const warming = new Map<string, Promise<void>>()
 export function warmHermes(bin: string, appDir: string): Promise<void> {
   const running = warming.get(appDir)
   if (running) return running
-  const { execFile } = require('node:child_process') as typeof import('node:child_process')
   const done = new Promise<void>((resolve) => {
     execFile(bin, ['pm', 'repair'], { timeout: 300_000, env: { ...process.env, HERMES_HOME: appDir } }, (err) => {
       if (err) warming.delete(appDir)
