@@ -281,12 +281,14 @@ export const countedTokens = (u: { inputTokens: number; cacheReadTokens: number;
   Math.round(u.inputTokens - u.cacheReadTokens * (1 - CACHE_READ_WEIGHT) + u.outputTokens)
 
 // `windows`: the install command for PowerShell, where the POSIX one doesn't run.
-export const ENGINES: Record<EngineId, { label: string; cli: string; login: string; install: string; windows?: string; site: string }> = {
+// `min`: the oldest version the app can drive — install hints say it, and an older
+// one gets a warning instead of failing every turn.
+export const ENGINES: Record<EngineId, { label: string; cli: string; login: string; install: string; windows?: string; min?: string; site: string }> = {
   claude: { label: 'Claude Code', cli: 'claude', login: 'claude auth login', install: 'curl -fsSL https://claude.ai/install.sh | bash', windows: 'irm https://claude.ai/install.ps1 | iex', site: 'https://code.claude.com' },
   codex: { label: 'Codex', cli: 'codex', login: 'codex login', install: 'npm install -g @openai/codex', site: 'https://github.com/openai/codex' },
   opencode: { label: 'OpenCode', cli: 'opencode', login: 'opencode auth login', install: 'curl -fsSL https://opencode.ai/install | bash', site: 'https://opencode.ai' },
   pi: { label: 'Pi', cli: 'pi', login: 'pi', install: 'npm install -g @earendil-works/pi-coding-agent', site: 'https://pi.dev' },
-  hermes: { label: 'Hermes', cli: 'hermes', login: 'hermes setup', install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash', site: 'https://hermes-agent.nousresearch.com' }
+  hermes: { label: 'Hermes', cli: 'hermes', login: 'hermes setup', install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash', min: '0.22.0', site: 'https://hermes-agent.nousresearch.com' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
 

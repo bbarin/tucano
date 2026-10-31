@@ -228,6 +228,7 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
         <div className="harness__body">
           <span className="hint">{windows ? L('Pra instalar, cole no PowerShell:', 'To install, paste in PowerShell:') : L('Pra instalar, cole no terminal:', 'To install, paste in a terminal:')}</span>
           <code className="harness__cmd">{(windows && ENGINES[engine].windows) || ENGINES[engine].install}</code>
+          {ENGINES[engine].min && <span className="hint">{L(`Precisa da ${ENGINES[engine].min} ou mais nova.`, `Needs ${ENGINES[engine].min} or newer.`)}</span>}
         </div>
       )}
       {st.warning && <p className="hint hint--warn harness__body">{st.warning}</p>}

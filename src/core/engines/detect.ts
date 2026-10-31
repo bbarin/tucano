@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { L } from '../../shared/lang'
-import type { EngineId, EngineStatus } from '../../shared/types'
+import { ENGINES, type EngineId, type EngineStatus } from '../../shared/types'
 import { executableNames, isWin, pathDirs, spawnable } from '../platform'
 import { userProvider } from './claude'
 import { codexEnv, userCodexProvider } from './codex'
@@ -48,6 +48,18 @@ async function which(cmd: string): Promise<string | undefined> {
 }
 
 const version = (out: string): string | undefined => out.match(/\d+\.\d+\.\d+/)?.[0]
+
+// "0.22.5" is at least "0.22.0": compare part by part, missing parts as zero.
+export const olderThan = (found: string, min: string): boolean => {
+  const a = found.split('.').map((n) => parseInt(n, 10) || 0)
+  const b = min.split('.').map((n) => parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] ?? 0
+    const y = b[i] ?? 0
+    if (x !== y) return x < y
+  }
+  return false
+}
 
 export async function detectClaude(): Promise<EngineStatus> {
   const path = await which('claude')
@@ -208,7 +220,19 @@ export async function detectHermes(): Promise<{ status: EngineStatus; models: st
   void warmHermes(path, hermesAppDir()) // started early; every run waits for it
   const models = parseHermesModels(undefined, hermesEndpointProviders(userHermesProviders()['providers'] as Record<string, unknown> | undefined))
   // What the cache lists is what the person can use; the status is the list.
-  return { status: listedStatus(path, v.stdout, models, 'hermes setup'), models }
+  const status = listedStatus(path, v.stdout, models, 'hermes setup')
+  // The options the app runs it with (--format stream-json, --query-file) are
+  // 0.22's; the package on PyPI is older and would fail every single turn, so
+  // the row says it instead of the person finding out mid-conversation.
+  const found = version(v.stdout)
+  const min = ENGINES.hermes.min
+  if (found && min && olderThan(found, min)) {
+    status.warning = L(
+      `O seu Hermes é ${found}: o Tucano roda com a ${min} ou mais nova (o pacote do PyPI é mais antigo e não tem as opções que o app usa). Atualize pelo instalador oficial.`,
+      `Your Hermes is ${found}: Tucano runs with ${min} or newer (the package on PyPI is older and lacks the options the app uses). Update through the official installer.`
+    )
+  }
+  return { status, models }
 }
 
 export async function detectEngines(codexHome: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>> }> {

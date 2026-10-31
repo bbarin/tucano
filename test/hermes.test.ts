@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import { describe, expect, it } from 'vitest'
 import { hermesArgs, hermesEnv, hermesHome, hermesParser, userHermesProviders, warmHermes } from '../src/core/engines/hermes'
-import { hermesEndpointProviders, parseHermesModels } from '../src/core/engines/detect'
+import { hermesEndpointProviders, olderThan, parseHermesModels } from '../src/core/engines/detect'
+import { ENGINES } from '../src/shared/types'
 
 // Fixture is real CLI output (`hermes chat --format stream-json`, Hermes 2026-10-29), trimmed.
 const lines = readFileSync(join(import.meta.dirname, 'fixtures', 'hermes-stream.jsonl'), 'utf8').split('\n').filter((l) => l.trim())
@@ -184,6 +185,17 @@ describe('hermes setup', () => {
     expect(warmHermes(bin, dir)).toBe(first) // one build per root, not per caller
     await first
     expect(readFileSync(log, 'utf8').trim()).toBe('pm repair')
+  })
+
+  it('knows when the installed Hermes is older than what the app drives', () => {
+    // The flags the engine uses are 0.22's; PyPI's package is older.
+    expect(olderThan('0.19.0', '0.22.0')).toBe(true)
+    expect(olderThan('0.22.0', '0.22.0')).toBe(false)
+    expect(olderThan('0.22.5', '0.22.0')).toBe(false)
+    expect(olderThan('0.9.0', '0.22.0')).toBe(true) // part by part, not as text: 9 < 22
+    // the hint the row shows points at the official installer, floor stated
+    expect(ENGINES.hermes.install).toContain('hermes-agent.nousresearch.com/install.sh')
+    expect(ENGINES.hermes.min).toBe('0.22.0')
   })
 
   it('tries again when a repair fails', async () => {
