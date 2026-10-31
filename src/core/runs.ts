@@ -258,8 +258,38 @@ export class Runner {
     db.saveMessage(ask)
     emit({ type: 'message', message: ask })
 
+    return new Promise((resolve) =>
+      this.enqueue(() =>
+        this.execute(agent, conv, { depth: 1, task: this.routineTask(r, when, me), work: event ? workIn(event.title) : undefined, routine: true }).then(resolve, (e: unknown) => {
+          resolve(undefined)
+          throw e
+        })
+      )
+    )
+  }
+
+  // A routine's reply that failed, run again in place with the same request.
+  async retryRoutine(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, messageId: string): Promise<Message | undefined> {
+    const { db } = this.deps
+    const msg = db.message(messageId)
+    const conv = db.conversation(r.conversationId)
+    const agent = db.agent(r.agentId)
+    if (!msg?.run || msg.run.status !== 'failed' || !conv || !agent || agent.archived) return undefined
+    const me = (await this.deps.settings()).workspaceName
+    return new Promise((resolve) =>
+      this.enqueue(() =>
+        this.execute(agent, conv, { depth: 1, existing: msg, task: this.routineTask(r, when, me), work: msg.run!.work, routine: true }).then(resolve, (e: unknown) => {
+          resolve(undefined)
+          throw e
+        })
+      )
+    )
+  }
+
+  private routineTask(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, me: string): string {
+    const { event } = when
     const hm = new Date(when.scheduledAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
-    const task = [
+    return [
       event
         ? L(
             `Esta é a rotina "${r.name}", que ${me} criou pra rodar quando acontece um evento: ${event.source}. Aconteceu agora: ${event.title}.`,
@@ -281,14 +311,6 @@ export class Runner {
     ]
       .filter(Boolean)
       .join(' ')
-    return new Promise((resolve) =>
-      this.enqueue(() =>
-        this.execute(agent, conv, { depth: 1, task, work: event ? workIn(event.title) : undefined, routine: true }).then(resolve, (e: unknown) => {
-          resolve(undefined)
-          throw e
-        })
-      )
-    )
   }
 
   // Resolves when nothing is routing, running or queued (tests and shutdown).
@@ -1241,6 +1263,35 @@ export class Runner {
 
   async expireApprovals(): Promise<void> {
     for (const ap of this.deps.db.expiredApprovals()) await this.decide(ap.id, 'expired')
+  }
+
+  // The user took over the agent's browser ("Assumir") and handed it back
+  // ("Devolver" or closing the window) — exactly what the agent asked for with
+  // ask_user, so it goes on by itself instead of waiting for a message.
+  async handedBack(agentId: string): Promise<void> {
+    // Paused, nobody starts working: the question stays pending, as a message would leave it.
+    if (this.paused) return
+    const agent = this.deps.db.agent(agentId)
+    if (!agent || agent.archived) return
+    let hit: { conv: Conversation; asked: Message } | undefined // the latest pending question of this agent, any conversation
+    for (const conv of this.deps.db.conversations()) {
+      const asked = this.deps.db
+        .recentMessages(conv.id, 50)
+        .reverse()
+        .find((m) => m.author.kind === 'agent' && m.author.id === agentId && m.run?.status === 'waiting_input')
+      if (asked && (!hit || asked.at > hit.asked.at)) hit = { conv, asked }
+    }
+    if (!hit) return
+    const { conv, asked } = hit
+    this.update(asked, { run: { ...asked.run!, status: 'done' } })
+    const { workspaceName } = await this.deps.settings()
+    this.enqueue(() =>
+      this.execute(agent, conv, {
+        depth: 1,
+        work: asked.run?.work,
+        task: L(`${workspaceName} devolveu o controle do seu navegador. Continue de onde parou.`, `${workspaceName} handed your browser back. Pick up where you left off.`)
+      })
+    )
   }
 
   // An agent that mentions another agent of the conversation hands it the turn,

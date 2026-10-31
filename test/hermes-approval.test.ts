@@ -61,7 +61,7 @@ describe.skipIf(!enabled)('a Hermes agent asking for a sensitive tool', () => {
 
     const settings: Settings = {
       workspaceName: 'Marina', context: '',
-      engines: { claude: ready, codex: ready, opencode: ready, pi: ready, hermes: ready },
+      engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, hermes: ready },
       routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000,
       approvalTtlHours: 24, theme: 'system', language: 'en'
     }
@@ -77,7 +77,7 @@ describe.skipIf(!enabled)('a Hermes agent asking for a sensitive tool', () => {
     // tool layer with its approvals.
     const runner = new Runner({
       db,
-      engines: { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), hermes: hermesEngine(() => bin, root) },
+      engines: { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), hermes: hermesEngine(() => bin, root) },
       settings: async () => settings,
       emit: (e) => events.push(e),
       workDir: join(dir, 'work'),

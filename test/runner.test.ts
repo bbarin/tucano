@@ -29,7 +29,7 @@ let settings: Settings
 
 function runner(engine: Engine = fakeEngine('claude', { delayMs: 1 })): Runner {
   claude = counted(engine)
-  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), hermes: fakeEngine('hermes') }
+  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), hermes: fakeEngine('hermes'), gemini: fakeEngine('gemini') }
   return new Runner({ db, engines, settings: async () => settings, emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')) })
 }
 
@@ -38,7 +38,7 @@ const agentMessages = (): Message[] => db.messages().filter((m) => m.author.kind
 beforeEach(() => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'test.db'))
   events = []
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, hermes: ready, gemini: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   db.saveAgent(agent('a1', 'lia'))
   db.saveAgent(agent('a2', 'theo', { modelId: 'gpt-5.6-luna' }))
   db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
@@ -66,7 +66,7 @@ describe('Runner', () => {
   it('keeps the images I attach and shows them to the agent with my message', async () => {
     const data = mkdtempSync(join(tmpdir(), 'ad-data-'))
     claude = counted(fakeEngine('claude', { delayMs: 1 }))
-    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), hermes: fakeEngine('hermes') }, settings: async () => settings, emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), dataDir: data })
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), hermes: fakeEngine('hermes'), gemini: fakeEngine('gemini') }, settings: async () => settings, emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), dataDir: data })
     const png = Buffer.from('fake-png').toString('base64')
     await r.send('d1', '', [{ name: 'Tela do checkout.png', mime: 'image/png', data: png }, { name: 'virus.exe', mime: 'application/x-msdownload', data: png }])
     await r.idle()
@@ -157,6 +157,15 @@ describe('Runner', () => {
       ['a1', 3]
     ])
     expect(db.messages().at(-1)?.text).toContain('Parei a conversa entre agentes')
+  })
+
+  it('does not hand the turn for a handle quoted inside a code block', async () => {
+    // The reply shows a prompt in a fenced block that mentions the other agent (the case that made an agent answer twice).
+    const quoted = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? 'O prompt é este:\n```\n@theo, pode ajudar aqui?\n```' : 'ok') })
+    const r = runner(quoted)
+    await r.send('c1', '@lia começa')
+    await r.idle()
+    expect(agentMessages().map((m) => (m.author as { id: string }).id)).toEqual(['a1'])
   })
 
   it('retries a failed reply in place', async () => {
@@ -261,7 +270,7 @@ describe('ask_user through the gateway', () => {
     claude = counted(fakeEngine('claude', { delayMs: 1 }))
     const r = new Runner({
       db,
-      engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), hermes: fakeEngine('hermes') },
+      engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), hermes: fakeEngine('hermes'), gemini: fakeEngine('gemini') },
       settings: async () => settings,
       emit: (e) => events.push(e),
       workDir: mkdtempSync(join(tmpdir(), 'ad-work-')),
@@ -283,5 +292,68 @@ describe('ask_user through the gateway', () => {
     expect((replies[1]!.author as { id: string }).id).toBe('a1')
     expect(claude.turns[1]?.prompt).toContain('pergunta enviada a Edu pela ferramenta ask_user: Pra quando você precisa disso?')
     expect(db.messages().some((m) => m.text.startsWith('Chamei'))).toBe(false)
+  })
+})
+
+describe('browser handback', () => {
+  let gateway: Gateway
+
+  beforeEach(async () => {
+    gateway = new Gateway()
+    await gateway.start()
+    return () => gateway.stop()
+  })
+
+  function runnerWithGateway(): Runner {
+    claude = counted(fakeEngine('claude', { delayMs: 1 }))
+    return new Runner({
+      db,
+      engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), hermes: fakeEngine('hermes') },
+      settings: async () => settings,
+      emit: (e) => events.push(e),
+      workDir: mkdtempSync(join(tmpdir(), 'ad-work-')),
+      gateway
+    })
+  }
+
+  it('resumes the pending ask_user on its own when the browser is handed back', async () => {
+    const r = runnerWithGateway()
+    await r.send('c1', '@lia me pergunta o que faltar')
+    await r.idle()
+    const [asked] = agentMessages()
+    expect(asked?.run?.status).toBe('waiting_input')
+
+    // No new human message: the handback itself is the answer.
+    await r.handedBack('a1')
+    await r.idle()
+
+    expect(db.message(asked!.id)?.run?.status).toBe('done')
+    const replies = agentMessages()
+    expect(replies).toHaveLength(2)
+    expect((replies[1]!.author as { id: string }).id).toBe('a1')
+    expect(claude.turns[1]?.prompt).toContain('devolveu o controle do seu navegador')
+    expect(events.some((e) => e.type === 'message' && (e as { message?: Message }).message?.author.kind === 'agent')).toBe(true)
+  })
+
+  it('leaves the question pending while the agents are paused', async () => {
+    const r = runnerWithGateway()
+    await r.send('c1', '@lia me pergunta o que faltar')
+    await r.idle()
+    const [asked] = agentMessages()
+    r.setPaused(true)
+    await r.handedBack('a1')
+    await r.idle()
+    expect(db.message(asked!.id)?.run?.status).toBe('waiting_input')
+    expect(agentMessages()).toHaveLength(1)
+  })
+
+  it('does nothing when nothing is pending or the agent is gone', async () => {
+    const r = runnerWithGateway()
+    await r.handedBack('a1')
+    await r.idle()
+    expect(claude.turns).toHaveLength(0)
+    await r.handedBack('ghost')
+    await r.idle()
+    expect(claude.turns).toHaveLength(0)
   })
 })

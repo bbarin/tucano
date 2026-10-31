@@ -13,8 +13,10 @@ import {
   engineModels,
   harnessMcps,
   importHarnessMcp,
+  installEngine,
   loginEngine,
   modelInfo,
+  openExternal,
   testEngine,
   updateSettings,
   useStore,
@@ -78,10 +80,12 @@ export function ModelPicker({ value, onChange, engines, jev }: { value: string; 
   const other = value !== 'jev' && !!engine && (typing || (!!m?.id && m.engine === engine && !inList && !loading))
   const name = m && m.engine === engine && !MODELS.some((x) => x.id === value) ? m.id : ''
 
+  // A harness's own card passes just that harness: it's already chosen there, so no select.
+  const fixed = engines?.length === 1 && !jev
   if (!engine && !jev) return <p className="hint hint--warn">{L('Nenhum harness pronto. Veja em Configurações → Modelos.', 'No harness ready. See Settings → Models.')}</p>
   return (
     <div className="model-picker">
-      {(choices.length > 1 || jev) && (
+      {!fixed && (
         <select
           value={value === 'jev' ? 'jev' : engine}
           onChange={(e) => {
@@ -171,6 +175,8 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
   // No terminal could be opened: the command, for the person to run.
   const [manual, setManual] = useState<string | null>(null)
+  // The install: started in a terminal, or blocked on Node.js for an npm package.
+  const [install, setInstall] = useState<'started' | 'node' | null>(null)
   const windows = useStore((s) => s.platform === 'windows')
   const ready = st.loggedIn
   const found = st.installed && !!st.route // what its setup says, picked or not
@@ -208,6 +214,15 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
             {L('Testar', 'Test')}
           </button>
         )}
+        {!st.installed && !st.soon && (
+          <button
+            className="btn btn--sm btn--primary"
+            title={L('Abre um terminal que instala pra você', 'Opens a terminal that installs it for you')}
+            onClick={() => void installEngine(engine).then((r) => setInstall(r.needsNode ? 'node' : r.opened ? 'started' : null))}
+          >
+            {L('Instalar', 'Install')}
+          </button>
+        )}
         {st.installed && !st.loggedIn && !st.soon && (
           <button
             className="btn btn--sm btn--primary"
@@ -224,9 +239,18 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
           <code className="harness__cmd">{manual}</code>
         </div>
       )}
+      {!st.installed && install === 'started' && <p className="hint harness__body">{L('Instalando no terminal que abriu. Quando terminar, ele aparece aqui sozinho.', 'Installing in the terminal that opened. Once it finishes, it shows up here on its own.')}</p>}
+      {!st.installed && install === 'node' && (
+        <p className="hint hint--warn harness__body">
+          {L(`O ${ENGINES[engine].label} precisa do Node.js. Instale o Node.js e depois clique em Instalar de novo.`, `${ENGINES[engine].label} needs Node.js. Install Node.js, then click Install again.`)}{' '}
+          <button className="btn btn--ghost btn--sm" onClick={() => openExternal('https://nodejs.org/')}>
+            {L('Baixar o Node.js', 'Get Node.js')}
+          </button>
+        </p>
+      )}
       {!st.installed && (
         <div className="harness__body">
-          <span className="hint">{windows ? L('Pra instalar, cole no PowerShell:', 'To install, paste in PowerShell:') : L('Pra instalar, cole no terminal:', 'To install, paste in a terminal:')}</span>
+          <span className="hint">{windows ? L('Ou cole no PowerShell:', 'Or paste in PowerShell:') : L('Ou cole no terminal:', 'Or paste in a terminal:')}</span>
           <code className="harness__cmd">{(windows && ENGINES[engine].windows) || ENGINES[engine].install}</code>
           {ENGINES[engine].min && <span className="hint">{L(`Precisa da ${ENGINES[engine].min} ou mais nova.`, `Needs ${ENGINES[engine].min} or newer.`)}</span>}
         </div>

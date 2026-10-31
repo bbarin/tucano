@@ -345,6 +345,16 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' }
   })
 
+  // react-markdown renders message links as plain <a href>, and a plain click
+  // navigates this whole window away (the app "disappears" behind the site).
+  // Same promise as above, for those: web links go to the real browser;
+  // a same-URL navigation (reload) is not a link and stays.
+  win.webContents.on('will-navigate', (event, url) => {
+    if (!/^https?:\/\//.test(url) || url === win.webContents.getURL()) return
+    event.preventDefault()
+    void shell.openExternal(url)
+  })
+
   if (process.env['ELECTRON_RENDERER_URL']) {
     void win.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {

@@ -217,6 +217,7 @@ export interface BrowserDeps {
   emit: (e: CoreEvent) => void
   me: () => string
   jev?: { key(): Promise<string | undefined>; on(): boolean; fetch?: typeof fetch } // finds what to click, when chosen
+  onHandback?: (agentId: string) => void // the user handed the browser back; the runner resumes a pending ask_user
 }
 
 type Ctx = { conversationId: string; messageId: string }
@@ -288,7 +289,10 @@ export class Browser {
     if (this.views.get(agentId)?.shown === shown) return
     this.live(agentId)
     this.update(agentId, { shown }, { label: shown ? L(`${this.deps.me()} assumiu`, `${this.deps.me()} took over`) : L(`${this.deps.me()} devolveu`, `${this.deps.me()} handed back`), detail: '' })
-    if (!shown) void this.deps.host(agentId, 'frame').then((r) => this.seen(agentId, r), () => {})
+    if (!shown) {
+      void this.deps.host(agentId, 'frame').then((r) => this.seen(agentId, r), () => {})
+      this.deps.onHandback?.(agentId)
+    }
   }
 
   async action(agent: Agent, action: 'show' | 'hide' | 'clear'): Promise<void> {

@@ -4,7 +4,7 @@ import { L, lang, type Lang } from './lang'
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
 export type GrantLevel = 'none' | 'read' | 'read_write'
 export type ToolClass = 'read' | 'write' | 'sensitive'
-export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'hermes'
+export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'hermes' | 'gemini'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh'
 export type MemoryMode = 'auto' | 'approve' | 'read' // how an agent's `lembrar` calls land
 
@@ -203,7 +203,11 @@ export interface Settings {
 }
 
 // What the main process does in an agent's browser for the core, and what it answers (spec §24).
-export type BrowserOp = 'open' | 'snapshot' | 'click' | 'type' | 'key' | 'scroll' | 'back' | 'text' | 'frame' | 'show' | 'hide' | 'close' | 'clear'
+export type BrowserOp = 'open' | 'snapshot' | 'click' | 'type' | 'key' | 'scroll' | 'back' | 'text' | 'frame' | 'show' | 'hide' | 'close' | 'clear' | 'input'
+
+// What I do on the agent's browser from the panel, when it has no window of its own
+// (Tucano as a server): x and y are fractions of the screen.
+export type BrowserInput = { kind: 'click'; x: number; y: number } | { kind: 'text'; text: string } | { kind: 'key'; key: string } | { kind: 'scroll'; dy: number }
 
 export interface BrowserElement {
   ref: number // its number in the last snapshot of the page
@@ -286,8 +290,9 @@ export const countedTokens = (u: { inputTokens: number; cacheReadTokens: number;
 export const ENGINES: Record<EngineId, { label: string; cli: string; login: string; install: string; windows?: string; min?: string; site: string }> = {
   claude: { label: 'Claude Code', cli: 'claude', login: 'claude auth login', install: 'curl -fsSL https://claude.ai/install.sh | bash', windows: 'irm https://claude.ai/install.ps1 | iex', site: 'https://code.claude.com' },
   codex: { label: 'Codex', cli: 'codex', login: 'codex login', install: 'npm install -g @openai/codex', site: 'https://github.com/openai/codex' },
-  opencode: { label: 'OpenCode', cli: 'opencode', login: 'opencode auth login', install: 'curl -fsSL https://opencode.ai/install | bash', site: 'https://opencode.ai' },
+  opencode: { label: 'OpenCode', cli: 'opencode', login: 'opencode auth login', install: 'curl -fsSL https://opencode.ai/install | bash', windows: 'npm install -g opencode-ai', site: 'https://opencode.ai' },
   pi: { label: 'Pi', cli: 'pi', login: 'pi', install: 'npm install -g @earendil-works/pi-coding-agent', site: 'https://pi.dev' },
+  gemini: { label: 'Gemini CLI', cli: 'gemini', login: 'gemini', install: 'npm install -g @google/gemini-cli', site: 'https://github.com/google-gemini/gemini-cli' },
   hermes: { label: 'Hermes', cli: 'hermes', login: 'hermes setup', install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash', min: '0.22.0', site: 'https://hermes-agent.nousresearch.com' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
@@ -434,6 +439,11 @@ export const SUMMARY_WINDOW = 30 // messages kept verbatim after a consolidation
 export const SUMMARY_MAX_AFTER = 50 // more than this after the summary triggers one
 export const STALE_DAYS = 60
 
+// Code in a message, a fenced block or inline code, is quoted content: a @handle there neither
+// calls the agent (mentioned() in the core) nor is bolded on screen (the message view). A fence
+// closes on the same run of backticks or tildes it opened with, so a ```` block can show a ``` one.
+export const CODE_SPANS = /(`{3,}|~{3,})[\s\S]*?(?:\1|$)|`[^`\n]*`/g
+
 // How much of each memory scope goes in every prompt, in characters. The most
 // recently confirmed fill it; the older ones past it aren't lost: agents search
 // them with buscar_memorias, offered only while some memory is past the budget.
@@ -493,7 +503,9 @@ export const IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024 // what the models take per image
 export const MAX_IMAGES_PER_MESSAGE = 10
 
-export const artifactUrl = (a: Pick<Artifact, 'id' | 'name'>): string => `tucano://artifact/${a.id}/${encodeURIComponent(a.name)}`
+// In a browser (Tucano as a server) the server itself serves them, under /artifact.
+export const artifactUrl = (a: Pick<Artifact, 'id' | 'name'>): string =>
+  `${(globalThis as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__ ? './artifact/' : 'tucano://artifact/'}${a.id}/${encodeURIComponent(a.name)}`
 
 // ---------- routines (spec §14) ----------
 
